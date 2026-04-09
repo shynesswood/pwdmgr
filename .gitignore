@@ -1,0 +1,46 @@
+# --- Go 相关 ---
+# 编译生成的二进制文件
+bin/
+# 默认生成的执行文件
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+# 主程序编译结果 (通常与项目文件夹同名)
+/pwdmgr
+
+# --- 依赖与工具 ---
+# 单元测试生成的覆盖率报告
+*.out
+*.test
+*.prof
+# 厂商依赖 (如果你使用了 'go mod vendor')
+# vendor/
+
+# --- 操作系统 ---
+.DS_Store
+Thumbs.db
+*.tmp
+
+# --- IDE/编辑器 ---
+# VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# JetBrains (GoLand, IntelliJ)
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# Vim
+*~
+*.swp
+
+# --- 环境/敏感信息 ---
+.env
+.env.local
