@@ -8,6 +8,11 @@ import (
 
 func SyncVault(path string, password []byte) error {
 
+	if !git.HasChanges(path) {
+		// 没有本地修改，只 pull
+		return git.Pull(path)
+	}
+
 	// 1. 读本地
 	localVault, err := storage.LoadVault(path, password)
 	if err != nil {
@@ -39,4 +44,12 @@ func SyncVault(path string, password []byte) error {
 	}
 
 	return nil
+}
+
+func PullVault(path string) error {
+	return git.Pull(path)
+}
+
+func PushVault(path string) error {
+	return git.Push(path)
 }

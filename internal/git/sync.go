@@ -26,3 +26,8 @@ func Push(path string) error {
 	_, err = runGitCommand(path, "push")
 	return err
 }
+
+func HasChanges(path string) bool {
+	out, _ := runGitCommand(path, "status", "--porcelain")
+	return len(out) > 0
+}
