@@ -1,31 +1,21 @@
 package main
 
-import (
-	"fmt"
-	"pwdmgr/internal/storage"
-	// "pwdmgr/internal/vault"
-)
+// import (
+// 	"pwdmgr/internal/git"
+// 	"pwdmgr/internal/service"
+// )
 
 func main() {
-	// v := vault.NewVault()
 
-	// entry := vault.NewEntry(
-	// 	"GitHub",
-	// 	"test",
-	// 	"123456",
-	// 	"",
-	// 	[]string{"work"},
-	// )
+	// path := ""
+	// // 1. clone 或已有 repo
 
-	// v.AddEntry(entry)
+	// // 2. pull 一下（确保最新）
+	// git.Pull(path)
 
-	// storage.SaveVault("vault.dat", []byte("123456"), v)
+	// // 3. 确保 vault 存在
+	// service.InitAndPushIfNeeded(path, password)
 
-	v2, err := storage.LoadVault("vault.dat", []byte("123456"))
-	if err != nil {
-		fmt.Println("加载失败:", err)
-		return
-	}
-
-	fmt.Println(v2.Entries)
+	// // 4. 加载 vault
+	// v, err := service.EnsureVault(vaultPath, password)
 }
