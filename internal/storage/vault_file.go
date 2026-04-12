@@ -13,7 +13,8 @@ func LoadVault(path string, password []byte) (*vault.Vault, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("load failed: data file not found")
+			// 保留 os.ErrNotExist 链，供上层区分「尚无库文件」与「解密失败」
+			return nil, fmt.Errorf("数据文件不存在: %w", err)
 		}
 		return nil, err
 	}

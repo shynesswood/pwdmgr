@@ -1,47 +1,63 @@
 package service
 
 import (
+	"fmt"
 	"os"
 
+	"pwdmgr/internal/config"
 	"pwdmgr/internal/git"
 	"pwdmgr/internal/storage"
 	"pwdmgr/internal/vault"
 )
 
-func EnsureVault(path string, password []byte) (*vault.Vault, error) {
+// EnsureVault 在仓库根目录下加载或创建 vault.dat。
+func EnsureVault(repoRoot string, password []byte) (*vault.Vault, error) {
+	vaultPath := config.VaultFilePath(repoRoot)
 
-	if fileExists(path) {
-		// 已存在 → 正常加载
-		return storage.LoadVault(path, password)
+	if fileExists(vaultPath) {
+		return storage.LoadVault(vaultPath, password)
 	}
 
-	// 不存在 → 初始化
 	v := vault.NewVault()
-
-	if err := storage.SaveVault(path, password, v); err != nil {
+	if err := storage.SaveVault(vaultPath, password, v); err != nil {
 		return nil, err
 	}
 
 	return v, nil
 }
 
-func InitAndPushIfNeeded(path string, password []byte) error {
+// InitLocalVault 在本地目录初始化 Git 仓库（若尚未初始化）并创建空的加密 vault.dat。
+func InitLocalVault(repoRoot string, password []byte) error {
+	if repoRoot == "" {
+		return fmt.Errorf("仓库路径不能为空")
+	}
+	if !git.IsGitRepo(repoRoot) {
+		if err := git.Init(repoRoot); err != nil {
+			return err
+		}
+	}
+	vaultPath := config.VaultFilePath(repoRoot)
+	if fileExists(vaultPath) {
+		return fmt.Errorf("本地 vault 已存在")
+	}
+	v := vault.NewVault()
+	return storage.SaveVault(vaultPath, password, v)
+}
 
-	vaultPath := path + "/vault.dat"
+func InitAndPushIfNeeded(repoRoot string, password []byte) error {
+	vaultPath := config.VaultFilePath(repoRoot)
 
 	if fileExists(vaultPath) {
 		return nil
 	}
 
-	// 初始化
 	v := vault.NewVault()
 
 	if err := storage.SaveVault(vaultPath, password, v); err != nil {
 		return err
 	}
 
-	// 推送到远程
-	return git.Push(path)
+	return git.Push(repoRoot)
 }
 
 func fileExists(path string) bool {

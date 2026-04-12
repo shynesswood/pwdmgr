@@ -1,0 +1,64 @@
+:root {
+  color-scheme: light dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  background: Canvas;
+  color: CanvasText;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background: #18181b;
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  body {
+    background: #fafafc;
+  }
+}
+
+#app {
+  min-height: 100vh;
+}
+
+::selection {
+  background: color-mix(in srgb, Highlight 30%, transparent);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, CanvasText 18%, transparent);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, CanvasText 28%, transparent);
+}

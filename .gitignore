@@ -44,3 +44,8 @@ Thumbs.db
 # --- 环境/敏感信息 ---
 .env
 .env.local
+pwdmgr.config.json
+
+build/bin
+node_modules
+frontend/dist
