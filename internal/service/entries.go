@@ -35,7 +35,7 @@ func ListEntries(repoRoot string, password []byte) ([]vault.Entry, error) {
 		}
 		return nil, err
 	}
-	out := append([]vault.Entry(nil), v.Entries...)
+	out := append([]vault.Entry{}, v.Entries...)
 	sort.Slice(out, func(i, j int) bool {
 		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
 	})

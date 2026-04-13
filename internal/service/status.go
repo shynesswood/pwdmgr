@@ -14,22 +14,22 @@ func GetRepoStatus(path string) (RepoStatus, error) {
 		return status, fmt.Errorf("仓库路径不能为空")
 	}
 
-	// 1. 是否是 git 仓库
 	status.IsGitRepo = git.IsGitRepo(path)
-
 	if !status.IsGitRepo {
 		return status, nil
 	}
 
-	// 2. 是否有 remote
+	status.CurrentBranch = git.CurrentBranch(path)
+	status.HasUncommitted = git.HasChanges(path)
+
 	hasRemote, err := git.HasOriginRemote(path)
 	if err != nil {
 		return status, err
 	}
 	status.HasRemote = hasRemote
 
-	// 3. remote 是否有数据
 	if hasRemote {
+		status.RemoteURL = git.RemoteURL(path)
 		remoteHas, err := git.RemoteHasCommit(path)
 		if err != nil {
 			return status, err
@@ -37,7 +37,6 @@ func GetRepoStatus(path string) (RepoStatus, error) {
 		status.RemoteHasData = remoteHas
 	}
 
-	// 4. 本地 vault 是否存在
 	status.HasLocalVault = vaultExists(path)
 
 	return status, nil

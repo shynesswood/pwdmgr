@@ -30,6 +30,9 @@ export namespace service {
 	    hasRemote: boolean;
 	    remoteHasData: boolean;
 	    hasLocalVault: boolean;
+	    hasUncommitted: boolean;
+	    currentBranch: string;
+	    remoteURL: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new RepoStatus(source);
@@ -41,6 +44,9 @@ export namespace service {
 	        this.hasRemote = source["hasRemote"];
 	        this.remoteHasData = source["remoteHasData"];
 	        this.hasLocalVault = source["hasLocalVault"];
+	        this.hasUncommitted = source["hasUncommitted"];
+	        this.currentBranch = source["currentBranch"];
+	        this.remoteURL = source["remoteURL"];
 	    }
 	}
 

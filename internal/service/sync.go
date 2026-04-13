@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"os"
 
 	"pwdmgr/internal/config"
 	"pwdmgr/internal/git"
@@ -14,44 +15,51 @@ func SyncVault(repoRoot string, password []byte) error {
 		return fmt.Errorf("仓库路径不能为空")
 	}
 
+	vaultPath := config.VaultFilePath(repoRoot)
+
 	if !git.HasChanges(repoRoot) {
-		// 没有本地修改，只 pull
 		return git.Pull(repoRoot)
 	}
 
-	vaultPath := config.VaultFilePath(repoRoot)
-
-	// 1. 读本地
+	// 1. 读取本地 vault（保存在内存中）
 	localVault, err := storage.LoadVault(vaultPath, password)
 	if err != nil {
 		return err
 	}
 
-	// 2. git pull
+	// 2. 清理工作区，让 pull 不会因未提交变更而失败
+	//    先删除文件，再尝试恢复到已提交版本（如果有的话）
+	os.Remove(vaultPath)
+	git.RestoreFile(repoRoot, config.VaultFileName)
+
+	// 3. pull
 	if err := git.Pull(repoRoot); err != nil {
+		// pull 失败则恢复本地 vault
+		_ = storage.SaveVault(vaultPath, password, localVault)
 		return err
 	}
 
-	// 3. 再读（远程更新后的）
-	remoteVault, err := storage.LoadVault(vaultPath, password)
-	if err != nil {
-		return err
+	// 4. 读取远程 vault（pull 后磁盘上的版本）
+	var remoteVault *vault.Vault
+	if fileExists(vaultPath) {
+		remoteVault, err = storage.LoadVault(vaultPath, password)
+		if err != nil {
+			return err
+		}
+	} else {
+		remoteVault = vault.NewVault()
 	}
 
-	// 4. merge
+	// 5. 应用层合并
 	merged := vault.MergeVault(localVault, remoteVault)
 
-	// 5. 保存
+	// 6. 保存
 	if err := storage.SaveVault(vaultPath, password, merged); err != nil {
 		return err
 	}
 
-	// 6. git push
-	if err := git.Push(repoRoot); err != nil {
-		return err
-	}
-
-	return nil
+	// 7. push
+	return git.Push(repoRoot)
 }
 
 func PullVault(repoRoot string) error {
