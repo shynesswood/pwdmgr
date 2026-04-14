@@ -110,11 +110,15 @@ const refreshEntries = async () => {
   if (!vaultUnlocked.value || !sessionPassword.value) return
   try {
     entries.value = (await ListVaultEntries(sessionPassword.value)) || []
-    showSuccess('条目已刷新')
   } catch (e) {
     showErr(e)
     lockVault()
   }
+}
+
+const doManualRefresh = async () => {
+  await refreshEntries()
+  if (vaultUnlocked.value) showSuccess('条目已刷新')
 }
 
 const refreshWithPassword = async (pwd) => {
@@ -190,7 +194,7 @@ const copyText = async (text) => {
   }
 }
 
-defineExpose({ lockVault, refreshWithPassword })
+defineExpose({ lockVault, refreshWithPassword, refreshEntries })
 </script>
 
 <template>
@@ -219,7 +223,7 @@ defineExpose({ lockVault, refreshWithPassword })
           </button>
         </div>
         <div class="toolbar__actions">
-          <button type="button" class="btn btn--ghost btn--icon" @click="refreshEntries" title="刷新条目">
+          <button type="button" class="btn btn--ghost btn--icon" @click="doManualRefresh" title="刷新条目">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
           </button>
           <button type="button" class="btn btn--primary" @click="formOpen = true; resetForm()">

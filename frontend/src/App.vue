@@ -138,8 +138,12 @@ const doReloadConfig = async () => {
 /* ---------- Sync operations ---------- */
 const doPull = async () => {
   syncing.value = true
-  try { await Pull(); await loadStatus(); showSuccess('Pull 完成') }
-  catch (e) { showErr(e) }
+  try {
+    await Pull()
+    await loadStatus()
+    if (vaultUnlocked.value) await vaultTabRef.value?.refreshEntries()
+    showSuccess('Pull 完成')
+  } catch (e) { showErr(e) }
   finally { syncing.value = false }
 }
 
