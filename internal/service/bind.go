@@ -53,8 +53,9 @@ func BindRemoteRepo(localPath, repoURL string, password []byte) error {
 			return err
 		}
 
-		// 移除本地 vault 文件，让 pull 不会因未提交变更而冲突
+		// 清理工作区：移除 vault 文件 + 恢复到已提交版本（若已跟踪）
 		os.Remove(vaultPath)
+		git.RestoreFile(localPath, config.VaultFileName)
 
 		if err := git.Pull(localPath); err != nil {
 			// pull 失败则恢复本地 vault
