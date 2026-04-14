@@ -20,7 +20,7 @@ func main() {
 	app := papp.NewApp()
 
 	err := wails.Run(&options.App{
-		Title:  "pwdmgr",
+		Title:  "kPass",
 		Width:  1024,
 		Height: 768,
 		AssetServer: &assetserver.Options{
