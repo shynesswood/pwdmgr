@@ -6,6 +6,7 @@ export namespace config {
 	    remote_url: string;
 	    vault_file_name: string;
 	    load_error?: string;
+	    search_paths?: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Snapshot(source);
@@ -18,6 +19,7 @@ export namespace config {
 	        this.remote_url = source["remote_url"];
 	        this.vault_file_name = source["vault_file_name"];
 	        this.load_error = source["load_error"];
+	        this.search_paths = source["search_paths"];
 	    }
 	}
 

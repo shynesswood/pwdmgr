@@ -43,9 +43,34 @@ wails dev
 wails build
 ```
 
+### 安装（macOS）
+
+```bash
+# 1. 构建（通用二进制，同时支持 Intel 和 Apple Silicon）
+wails build -platform darwin/universal
+
+# 2. 创建配置目录并放入配置文件
+mkdir -p ~/Library/Application\ Support/kPass
+cp pwdmgr.config.example.json ~/Library/Application\ Support/kPass/pwdmgr.config.json
+# 编辑配置文件，填入实际的 repo_root 和 remote_url
+
+# 3. 将应用拖入 Applications（可选，放在任意位置均可）
+cp -r build/bin/kPass.app /Applications/
+```
+
+> 配置文件路径由用户目录决定，与 `.app` 的安装位置无关，两步操作没有先后顺序要求。
+
+### 安装（Windows）
+
+```bash
+wails build -platform windows/amd64
+```
+
+将 `build/bin/` 下的 `kPass.exe` 放到任意目录，在同目录下创建 `pwdmgr.config.json` 即可；或将配置文件放到 `%AppData%\kPass\pwdmgr.config.json`。
+
 ### 配置
 
-在项目根目录（或工作目录）创建 `pwdmgr.config.json`：
+创建 `pwdmgr.config.json`：
 
 ```json
 {
@@ -59,7 +84,30 @@ wails build
 | `repo_root` | 是 | 本地 Git 仓库的绝对路径，密码库文件 `vault.dat` 存放于此 |
 | `remote_url` | 否 | Git 远程仓库地址，留空则仅本地使用，不同步 |
 
-也可通过环境变量 `PWDMGR_CONFIG` 指定配置文件路径：
+#### 配置文件位置
+
+应用按以下优先级自动搜索配置文件，找到第一个即使用：
+
+| 优先级 | 位置 | 说明 |
+|:------:|------|------|
+| 1 | 环境变量 `PWDMGR_CONFIG` 指定的路径 | 适用于开发调试 |
+| 2 | **用户配置目录** | 推荐的生产环境放置位置（见下表） |
+| 3 | 可执行文件同级目录 | Windows 下将配置与 exe 放一起即可 |
+| 4 | 当前工作目录 | `wails dev` 开发时自动使用项目根目录 |
+
+各平台的用户配置目录：
+
+| 平台 | 路径 |
+|------|------|
+| macOS | `~/Library/Application Support/kPass/pwdmgr.config.json` |
+| Windows | `%AppData%\kPass\pwdmgr.config.json` |
+| Linux | `~/.config/kPass/pwdmgr.config.json` |
+
+> **macOS 用户注意**：从 Finder / Launchpad 启动的 `.app` 应用，工作目录为 `/` 且不继承 shell 环境变量。请将配置文件放到上述用户配置目录，无需设置环境变量。
+
+#### 开发时指定配置
+
+开发模式下可通过环境变量覆盖：
 
 ```bash
 PWDMGR_CONFIG=/path/to/my-config.json wails dev

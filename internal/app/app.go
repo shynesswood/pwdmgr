@@ -46,6 +46,7 @@ func (a *App) GetAppConfig() config.Snapshot {
 			ConfigPath:    config.ResolveConfigPath(),
 			VaultFileName: config.VaultFileName,
 			LoadError:     a.cfgErr.Error(),
+			SearchPaths:   config.CandidatePaths(),
 		}
 	}
 	if a.cfg != nil {
@@ -54,6 +55,7 @@ func (a *App) GetAppConfig() config.Snapshot {
 	return config.Snapshot{
 		ConfigPath:    config.ResolveConfigPath(),
 		VaultFileName: config.VaultFileName,
+		SearchPaths:   config.CandidatePaths(),
 	}
 }
 
