@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, inject } from 'vue'
+import { ref, computed, inject, nextTick } from 'vue'
 import {
   ListVaultEntries,
   AddVaultEntry,
@@ -7,6 +7,7 @@ import {
   DeleteVaultEntry,
 } from '../../wailsjs/go/app/App'
 import EntryCard from './EntryCard.vue'
+import EntryFormPanel from './EntryFormPanel.vue'
 
 const props = defineProps({
   vaultLabel: String,
@@ -132,7 +133,7 @@ const refreshWithPassword = async (pwd) => {
   }
 }
 
-const startEdit = (row) => {
+const startEdit = async (row) => {
   formMode.value = 'edit'
   form.value = {
     id: row.id,
@@ -143,6 +144,9 @@ const startEdit = (row) => {
     tagsStr: (row.tags || []).join(', '),
   }
   formOpen.value = true
+  await nextTick()
+  const el = document.querySelector('.entry-edit-form')
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
 }
 
 const submitForm = async () => {
@@ -233,6 +237,13 @@ defineExpose({ lockVault, refreshWithPassword, refreshEntries })
         </div>
       </div>
 
+      <div class="entries-status">
+        共 <strong>{{ entries.length }}</strong> 条记录
+        <span v-if="filteredEntries.length !== entries.length" class="entries-status__filter">
+          · 筛选显示 <strong>{{ filteredEntries.length }}</strong> 条
+        </span>
+      </div>
+
       <!-- Tag filter -->
       <Transition name="slide">
         <div v-if="allTags.length > 0" class="tag-filter">
@@ -252,37 +263,22 @@ defineExpose({ lockVault, refreshWithPassword, refreshEntries })
         </div>
       </Transition>
 
-      <!-- Entry form -->
+      <!-- Add entry form (top position) -->
       <Transition name="slide">
-        <div v-if="formOpen" class="form-panel">
-          <div class="form-panel__head">
-            <h3 class="form-panel__title">{{ formMode === 'add' ? '新建条目' : '编辑条目' }}</h3>
-            <button type="button" class="btn--close" @click="formOpen = false; resetForm()">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-          </div>
-          <div class="form-panel__body">
-            <div class="form-grid">
-              <label class="field"><span class="field__label">名称</span><input v-model="form.name" class="field__input" type="text" placeholder="例如：GitHub" autocomplete="off" /></label>
-              <label class="field"><span class="field__label">用户名</span><input v-model="form.username" class="field__input" type="text" placeholder="用户名或邮箱" autocomplete="off" /></label>
-              <label class="field field--full"><span class="field__label">密码</span><input v-model="form.password" class="field__input field__input--mono" type="text" placeholder="密码" autocomplete="off" /></label>
-              <label class="field field--full"><span class="field__label">标签</span><input v-model="form.tagsStr" class="field__input" type="text" placeholder="多个用逗号分隔，例如：工作, 社交" autocomplete="off" /></label>
-              <label class="field field--full"><span class="field__label">备注</span><textarea v-model="form.note" class="field__input field__textarea" rows="2" placeholder="可选备注信息" /></label>
-            </div>
-            <div class="form-panel__actions">
-              <button type="button" class="btn btn--ghost" @click="formOpen = false; resetForm()">取消</button>
-              <button type="button" class="btn btn--primary" @click="submitForm">{{ formMode === 'add' ? '添加' : '保存修改' }}</button>
-            </div>
-          </div>
-        </div>
+        <EntryFormPanel
+          v-if="formOpen && formMode === 'add'"
+          :mode="formMode"
+          :form="form"
+          class="form-panel-wrapper"
+          @submit="submitForm"
+          @cancel="formOpen = false; resetForm()"
+        />
       </Transition>
 
       <!-- Entries list -->
       <div class="entries">
-        <TransitionGroup name="entry">
+        <template v-for="row in filteredEntries" :key="row.id">
           <EntryCard
-            v-for="row in filteredEntries"
-            :key="row.id"
             :entry="row"
             :pwd-visible="!!pwdVisible[row.id]"
             :selected-tags="selectedTags"
@@ -292,7 +288,17 @@ defineExpose({ lockVault, refreshWithPassword, refreshEntries })
             @delete="deleteEntry(row)"
             @toggle-tag="toggleTag($event)"
           />
-        </TransitionGroup>
+          <Transition name="slide">
+            <EntryFormPanel
+              v-if="formOpen && formMode === 'edit' && form.id === row.id"
+              :mode="formMode"
+              :form="form"
+              class="entry-edit-form"
+              @submit="submitForm"
+              @cancel="formOpen = false; resetForm()"
+            />
+          </Transition>
+        </template>
 
         <div v-if="filteredEntries.length === 0 && entries.length > 0" class="empty-state">
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -342,12 +348,13 @@ defineExpose({ lockVault, refreshWithPassword, refreshEntries })
 .tag-chip--active { color: #fff; background: Highlight; }
 .tag-chip--active:hover { filter: brightness(1.08); color: #fff; }
 
-.form-panel { margin-bottom: 14px; border-radius: 10px; border: 1px solid color-mix(in srgb, Highlight 20%, color-mix(in srgb, CanvasText 8%, transparent)); background: color-mix(in srgb, Highlight 3%, Canvas); overflow: hidden; }
-.form-panel__head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid color-mix(in srgb, CanvasText 5%, transparent); }
-.form-panel__title { margin: 0; font-size: 13px; font-weight: 600; }
-.form-panel__body { padding: 16px; }
-.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.form-panel__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid color-mix(in srgb, CanvasText 5%, transparent); }
+.entries-status { font-size: 12px; color: color-mix(in srgb, CanvasText 45%, transparent); margin-bottom: 10px; padding: 0 2px; }
+.entries-status strong { font-weight: 700; color: color-mix(in srgb, CanvasText 65%, transparent); }
+.entries-status__filter { color: Highlight; }
+.entries-status__filter strong { color: inherit; }
+
+.form-panel-wrapper { margin-bottom: 14px; }
+.entry-edit-form { margin-top: 6px; }
 
 .entries { display: flex; flex-direction: column; gap: 6px; }
 
@@ -356,7 +363,6 @@ defineExpose({ lockVault, refreshWithPassword, refreshEntries })
 .empty-state__hint { font-size: 12px; }
 
 @media (max-width: 520px) {
-  .form-grid { grid-template-columns: 1fr; }
   .toolbar { flex-direction: column; align-items: stretch; }
   .toolbar__actions { justify-content: flex-end; }
 }

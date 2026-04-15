@@ -1,4 +1,6 @@
 <script setup>
+import { ref } from 'vue'
+
 defineProps({
   entry: Object,
   pwdVisible: Boolean,
@@ -6,6 +8,8 @@ defineProps({
 })
 
 const emit = defineEmits(['toggle-pwd', 'copy', 'edit', 'delete', 'toggle-tag'])
+
+const noteExpanded = ref(false)
 
 const avatarColors = [
   ['#3b82f6', '#6366f1'],
@@ -63,10 +67,20 @@ function getAvatarGradient(name) {
       </div>
     </div>
 
+    <Transition name="slide">
+      <div v-if="noteExpanded && entry.note" class="entry-card__note">
+        <div class="entry-card__note-content">{{ entry.note }}</div>
+      </div>
+    </Transition>
+
     <div class="entry-card__footer">
       <button type="button" class="entry-card__action" @click="emit('edit')">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         编辑
+      </button>
+      <button v-if="entry.note" type="button" :class="['entry-card__action', noteExpanded && 'entry-card__action--active']" @click="noteExpanded = !noteExpanded">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        {{ noteExpanded ? '收起备注' : '备注' }}
       </button>
       <button type="button" class="entry-card__action entry-card__action--danger" @click="emit('delete')">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -266,6 +280,31 @@ function getAvatarGradient(name) {
   .entry-card__pwd-btn:hover { background: rgba(255, 255, 255, 0.08); color: #aaa; }
 }
 
+/* --- Note --- */
+.entry-card__note {
+  margin: 0 -16px;
+  padding: 10px 16px;
+  background: rgba(0, 0, 0, 0.02);
+  border-top: 1px solid rgba(0, 0, 0, 0.04);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.entry-card__note-content {
+  font-size: 13px;
+  line-height: 1.6;
+  color: color-mix(in srgb, CanvasText 70%, transparent);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (prefers-color-scheme: dark) {
+  .entry-card__note {
+    background: rgba(255, 255, 255, 0.02);
+    border-top-color: rgba(255, 255, 255, 0.04);
+    border-bottom-color: rgba(255, 255, 255, 0.04);
+  }
+}
+
 /* --- Footer --- */
 .entry-card__footer {
   display: flex;
@@ -297,6 +336,15 @@ function getAvatarGradient(name) {
 .entry-card__action:hover {
   background: rgba(0, 0, 0, 0.08);
   color: #333;
+}
+
+.entry-card__action--active {
+  background: color-mix(in srgb, Highlight 12%, transparent);
+  color: Highlight;
+}
+
+.entry-card__action--active:hover {
+  background: color-mix(in srgb, Highlight 18%, transparent);
 }
 
 .entry-card__action--danger:hover {
