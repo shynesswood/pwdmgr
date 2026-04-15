@@ -43,3 +43,20 @@
 - `pwdmgr.config.json` — 配置文件
 - `app.go` — 新增配置读写接口
 - 前端 `SettingsTab.vue` — 设置页面 UI
+
+## 多仓库支持（2.x）
+
+**优先级**：最低（计划 2.x 系列版本）  
+**动机**：当前仅支持单一远程仓库，若该仓库数据损坏或丢失，将无法找回数据。支持多个远程仓库可作为数据冗余备份，提升容灾能力。
+
+**方案**：
+1. 本地仓库保持一个，配置文件支持定义多个远程仓库地址
+2. push 时同时推送到所有远程仓库，pull 时从主远程拉取
+3. 当主远程不可用时，支持切换从备用远程拉取恢复
+
+**涉及文件**：
+- `pwdmgr.config.json` — 多远程配置结构
+- `internal/git/sync.go` — 多远程 push/pull 逻辑
+- `internal/service/sync.go` — 同步调度
+- `app.go` — 接口适配
+- 前端 `SettingsTab.vue` / `SyncTab.vue` — 多远程管理 UI
