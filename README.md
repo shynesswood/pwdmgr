@@ -6,9 +6,11 @@
 
 - **端到端加密** — Argon2id 派生密钥 + AES-256-GCM 加密，密码库文件 (`vault.dat`) 以二进制密文形式存储
 - **Git 同步** — 利用任意 Git 远程仓库（GitHub、GitLab、自建 Gitea 等）在多台设备间同步
-- **应用层合并** — 多设备并发修改时按条目 `updated_at` 时间戳自动合并，无需手动处理冲突
+- **可切换 Git 后端** — 默认走本机 `git` 命令；也可配置 `git_client: "go-git"` 切到纯 Go 实现，完全免安装 Git
+- **多空间隔离** — 支持创建多个逻辑空间（如"个人 / 工作"），条目按空间隔离展示，可单条或批量在空间之间移动
+- **软删除与合并** — 删除记 `deleted_at` 不立即清除，多设备并发修改时按 `updated_at` 合并条目/空间，无需手动处理冲突
 - **跨平台桌面应用** — 基于 [Wails](https://wails.io) 构建，支持 Windows / macOS / Linux
-- **零外部依赖** — 仅需本地安装 `git`，不依赖数据库或后台服务
+- **零外部依赖** — 不依赖数据库或后台服务；使用 go-git 后端时也不再依赖本机 Git
 
 ## 技术栈
 
@@ -17,7 +19,7 @@
 | 后端 | Go 1.26+、Wails v2 |
 | 前端 | Vue 3、Vite |
 | 加密 | Argon2id (golang.org/x/crypto) + AES-256-GCM (crypto/aes) |
-| 同步 | 原生 `git` 命令行（`os/exec`） |
+| 同步 | 可切换：系统 `git` 命令（`os/exec`） / [go-git v5](https://github.com/go-git/go-git)（纯 Go） |
 | 存储 | 单文件 `vault.dat`（JSON → 加密 → 二进制） |
 
 ## 快速开始
@@ -26,7 +28,7 @@
 
 - Go 1.26+
 - Node.js 16+
-- Git
+- Git（**可选**）— 仅 `git_client: "exec"`（默认）时需要；切到 `"go-git"` 后可免安装本机 Git
 - Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`)
 
 ### 构建 & 运行
@@ -75,14 +77,18 @@ wails build -platform windows/amd64
 ```json
 {
   "repo_root": "/绝对路径/到你的密码库-git仓库根目录",
-  "remote_url": "git@github.com:你的用户/远程仓库.git"
+  "remote_url": "git@github.com:你的用户/远程仓库.git",
+  "git_client": "exec"
 }
 ```
 
-| 字段 | 必填 | 说明 |
-|------|:----:|------|
-| `repo_root` | 是 | 本地 Git 仓库的绝对路径，密码库文件 `vault.dat` 存放于此 |
-| `remote_url` | 否 | Git 远程仓库地址，留空则仅本地使用，不同步 |
+| 字段 | 必填 | 默认 | 说明 |
+|------|:----:|:----:|------|
+| `repo_root` | 是 | — | 本地 Git 仓库的绝对路径，密码库文件 `vault.dat` 存放于此 |
+| `remote_url` | 否 | 空 | Git 远程仓库地址，留空则仅本地使用，不同步 |
+| `git_client` | 否 | `exec` | Git 底层实现：`exec` 调用本机 `git` 命令；`go-git` 使用纯 Go 实现（不依赖本机 Git）。留空或取值未知时回退为 `exec` |
+
+> **go-git 模式注意**：目前 go-git 后端的 `Pull` 仅支持 fast-forward / 合并（不支持 `--rebase`）。在我们同步时"工作区已清空再 pull"的前提下足够使用；若你习惯频繁手动改动本地仓库文件，推荐继续保持默认的 `exec` 后端。
 
 #### 配置文件位置
 
@@ -133,9 +139,9 @@ PWDMGR_CONFIG=/path/to/my-config.json wails dev
 点击 **同步** 页的 **同步远程仓库** 按钮，应用会自动执行：
 
 1. 读取本地密码库到内存
-2. 清理 Git 工作区 → `git pull --rebase`
-3. 将本地版本与远程版本按条目 ID + 时间戳合并
-4. 保存合并结果 → `git push`
+2. 清理 Git 工作区 → 拉取远程最新变更（`exec` 后端走 `git pull --rebase`，`go-git` 后端走 `fetch` + fast-forward）
+3. 将本地版本与远程版本按条目/空间 ID + `updated_at` 合并，软删除墓碑一并传播
+4. 保存合并结果 → 推送到远程
 
 ## 项目结构
 
@@ -147,37 +153,41 @@ pwdmgr/
 │
 ├── internal/
 │   ├── app/app.go             # Wails 绑定层，暴露方法给前端
-│   ├── config/config.go       # 配置文件加载与解析
+│   ├── config/config.go       # 配置文件加载与解析（含 git_client 规范化）
 │   ├── crypto/crypto.go       # Argon2id + AES-GCM 加解密
 │   ├── git/
-│   │   ├── git.go             # runGitCommand 底层封装
-│   │   └── sync.go            # Pull/Push/Commit/AddRemote 等 Git 操作
+│   │   ├── backend.go         # Backend 接口 + SetBackend / Normalize 分发
+│   │   ├── exec_backend.go    # 基于系统 `git` 命令的 exec 后端
+│   │   └── gogit_backend.go   # 基于 go-git v5 的纯 Go 后端
 │   ├── service/
 │   │   ├── bind.go            # BindRemoteRepo — 绑定远程仓库
 │   │   ├── sync.go            # SyncVault — 日常同步
 │   │   ├── init.go            # InitLocalVault — 创建本地库
-│   │   ├── entries.go         # CRUD 条目操作
-│   │   ├── repo_status.go     # 仓库状态查询
+│   │   ├── entries.go         # 条目 CRUD + 批量移动（MoveEntries）
+│   │   ├── spaces.go          # 空间 CRUD（默认空间受保护、同名检测、软删除）
+│   │   ├── repo_status.go     # 仓库状态查询结构
 │   │   └── status.go          # GetRepoStatus 实现
 │   ├── storage/
 │   │   ├── storage.go         # JSON 序列化/反序列化
 │   │   └── vault_file.go      # LoadVault / SaveVault
 │   └── vault/
-│       ├── model.go           # Entry / Vault 数据结构
-│       ├── merge.go           # 应用层合并（按 updated_at）
-│       ├── init.go            # NewVault / NewEntry
-│       ├── service.go         # AddEntry / UpdateEntry / DeleteEntry
+│       ├── model.go           # Entry / Space / Vault 数据结构
+│       ├── merge.go           # 应用层合并（条目/空间，软删除传播）
+│       ├── init.go            # NewVault / NewEntry / EnsureDefaultSpace
+│       ├── service.go         # 条目 / 空间的增删改 + MoveEntries
 │       ├── helper.go          # UUID 生成、时间戳
 │       └── utils.go           # 标签规范化等工具
 │
 ├── frontend/
 │   ├── src/
-│   │   ├── App.vue            # 主布局（顶栏、Tab 切换、弹窗管理）
+│   │   ├── App.vue            # 主布局（顶栏、Tab 切换、弹窗管理、provide askSpace）
 │   │   ├── main.js            # Vue 入口
 │   │   ├── style.css          # 全局样式
 │   │   └── components/
-│   │       ├── VaultTab.vue       # 保险库页（解锁/条目列表/搜索/表单）
-│   │       ├── EntryCard.vue      # 单条密码卡片
+│   │       ├── VaultTab.vue       # 保险库页（解锁/空间切换/搜索/批量选择/移动）
+│   │       ├── EntryCard.vue      # 单条密码卡片（含选择 + 移动按钮）
+│   │       ├── EntryFormPanel.vue # 新增 / 编辑条目表单
+│   │       ├── SpacePickerDialog.vue # 选择目标空间的通用弹窗
 │   │       ├── SyncTab.vue        # 同步页（仓库初始化/状态/操作）
 │   │       ├── SettingsTab.vue    # 设置页
 │   │       ├── PasswordDialog.vue # 密码输入弹窗
@@ -216,26 +226,36 @@ pwdmgr/
 ```json
 {
   "version": 1,
+  "spaces": [
+    { "id": "default", "name": "默认空间", "updated_at": 1713000000 },
+    { "id": "uuid-1",  "name": "工作",     "updated_at": 1713000100 }
+  ],
   "entries": [
     {
       "id": "uuid",
+      "space_id": "default",
       "name": "GitHub",
       "username": "user@example.com",
       "password": "secret",
       "note": "",
       "tags": ["工作", "开发"],
-      "updated_at": 1713000000
+      "updated_at": 1713000000,
+      "deleted_at": 0
     }
   ]
 }
 ```
 
+> 旧版 `vault.dat`（无 `spaces` 字段、条目无 `space_id`）在加载时会由 `EnsureDefaultSpace` 自动迁移到默认空间，无需手工处理。
+
 ### 合并策略
 
-多设备冲突时按条目粒度合并：
+多设备冲突时按条目/空间粒度合并：
 
-- 不同 ID → 两个条目都保留
-- 相同 ID → 取 `updated_at` 更大的版本
+- **不同 ID** → 两条都保留
+- **相同 ID** → 取 `updated_at` 更大的版本胜出
+- **软删除（`deleted_at > 0`）** → 与普通更新一样走 `updated_at` 比较。删除胜出时条目会保留墓碑；若远程有更晚的更新则"复活"
+- **空间移动** → `MoveEntries` 同时刷新条目的 `updated_at`，保证移动操作在同步中胜过旧版"留在原空间"的副本
 
 ### 安全须知
 

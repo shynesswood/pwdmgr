@@ -1,50 +1,8 @@
 # 待办事项
 
-## 合并逻辑：软删除支持
+## ~~Git 操作：使用 go-git 库重写~~（已完成）
 
-**优先级**：中  
-**现状**：`MergeVault` 无法区分"本地删除"和"远程新增"，导致本地删除的条目在同步后被远程重新拉回，永远无法真正删除。目前可通过强制 push/pull 规避。
-
-**方案**：
-1. `Entry` 增加 `DeletedAt int64` 字段，删除操作改为软删除（标记时间戳而非移除）
-2. `MergeVault` 合并时比较双方 `UpdatedAt`，保留更新的一方（包括删除标记）
-3. 前端展示时过滤掉 `DeletedAt > 0` 的条目
-
-**涉及文件**：
-- `internal/vault/model.go` — Entry 结构体
-- `internal/vault/merge.go` — 合并逻辑
-- `internal/vault/vault.go` — 删除方法改为软删除
-- `app.go` / 前端 — 列表过滤已删除条目
-
-## 空间隔离：多空间支持
-
-**优先级**：中  
-**动机**：当前所有密码条目混在一个保险库中，无法按场景（如工作、个人、客户项目等）隔离管理。当条目增多后查找和管理不便，也存在误操作风险。
-
-**方案**：
-1. 引入「空间」概念，每个空间对应一个独立的加密存储（或同一存储内的逻辑分区）
-2. 页面顶部或侧边栏增加空间切换器，支持创建、重命名、删除空间
-3. 条目归属于特定空间，切换空间后仅展示该空间下的条目
-4. 同步时各空间数据独立合并，互不干扰
-
-**涉及文件**：
-- `internal/vault/model.go` — 增加空间模型
-- `internal/vault/vault.go` — 按空间读写条目
-- `app.go` — 空间管理接口
-- 前端 `VaultTab.vue` / `App.vue` — 空间切换 UI
-
-## Git 操作：使用 go-git 库重写
-
-**优先级**：低  
-**现状**：底层 Git 操作通过调用系统 `git` 命令实现，依赖用户本地安装的 Git，且命令行调用在错误处理、跨平台兼容性方面不够健壮。
-
-**方案**：
-1. 引入 [go-git](https://github.com/go-git/go-git) 替代 `os/exec` 调用系统 Git
-2. 用纯 Go 实现 clone、pull、push、commit 等操作，消除对系统 Git 的依赖
-3. 统一错误处理，提升跨平台一致性
-
-**涉及文件**：
-- `internal/git/sync.go` — 主要重写对象
+> 已在保留原 `exec` 后端的前提下，新增基于 [go-git/v5](https://github.com/go-git/go-git) 的纯 Go 后端，通过 `internal/git` 的 `Backend` 接口统一分发。`pwdmgr.config.json` 新增 `git_client` 字段（`exec` / `go-git`），未配置时默认 `exec`，`app.Startup / ReloadConfig` 会据此切换后端；对外公共 API 签名保持不变。自动化测试新增 BK1~BK4、GG1~GG10、CFG-GC1~CFG-GC2 共 16 个用例。
 
 ## 页面配置：本地仓库与远程仓库
 

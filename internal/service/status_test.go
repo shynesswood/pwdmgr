@@ -64,7 +64,7 @@ func TestR3_RepoStatus_HasUncommitted(t *testing.T) {
 	require.NoError(t, service.InitLocalVault(dir, testPassword))
 	require.NoError(t, service.BindRemoteRepo(dir, remote, testPassword))
 
-	require.NoError(t, service.AddEntry(dir, testPassword, "NewSite", "user", "pass", "", nil))
+	require.NoError(t, service.AddEntry(dir, testPassword, "", "NewSite", "user", "pass", "", nil))
 
 	status, err := service.GetRepoStatus(dir)
 	require.NoError(t, err)

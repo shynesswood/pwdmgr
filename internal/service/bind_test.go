@@ -20,7 +20,7 @@ func TestB1_BindRemoteRepo_NewDirLocalVaultPush(t *testing.T) {
 	dir := freshDir(t)
 
 	require.NoError(t, service.InitLocalVault(dir, testPassword))
-	require.NoError(t, service.AddEntry(dir, testPassword, "Site", "u", "p", "", nil))
+	require.NoError(t, service.AddEntry(dir, testPassword, "", "Site", "u", "p", "", nil))
 
 	err := service.BindRemoteRepo(dir, remote, testPassword)
 	require.NoError(t, err)
@@ -71,7 +71,7 @@ func TestB3_BindRemoteRepo_EmptyLocalPullFromRemote(t *testing.T) {
 
 	assert.True(t, vaultFileExists(dir))
 
-	entries, err := service.ListEntries(dir, testPassword)
+	entries, err := service.ListEntries(dir, testPassword, "")
 	require.NoError(t, err)
 	assert.Len(t, entries, 1)
 	assert.Equal(t, "RemoteSite", entries[0].Name)

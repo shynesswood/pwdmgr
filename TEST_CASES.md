@@ -14,14 +14,18 @@
 | 包 | 测试文件 | 覆盖用例 |
 |----|----------|----------|
 | `internal/crypto` | `crypto_test.go` | 加解密往返、错误密码、空密码 |
-| `internal/vault` | `vault_test.go` | 模型 CRUD、MergeVault (B5/B6/B7)、标签 |
+| `internal/vault` | `vault_test.go` | 模型 CRUD、MergeVault (B5/B6/B7)、标签、软删除 (D1~D4)、多空间 (SP1~SP10)、批量移动 (MV1~MV4) |
 | `internal/storage` | `storage_test.go` | 序列化、SaveLoad 往返、X1 密码错误 |
-| `internal/git` | `git_test.go` | G1–G11 全部 |
+| `internal/git` | `git_test.go` | G1–G11（exec 后端） |
+| `internal/git` | `backend_test.go` | BK1–BK4（后端切换/规范化） |
+| `internal/git` | `gogit_test.go` | GG1–GG10（go-git 后端） |
+| `internal/config` | `config_test.go` | CFG-GC1 / CFG-GC2（git_client 字段解析） |
 | `internal/service` | `init_test.go` | I1–I4 |
 | `internal/service` | `status_test.go` | R1–R4 |
-| `internal/service` | `entries_test.go` | L1–L2、CRUD 集成 |
+| `internal/service` | `entries_test.go` | L1–L2、CRUD 集成、软删除 (D5/D6) |
+| `internal/service` | `spaces_test.go` | 多空间 CRUD + 按空间 CRUD (SP-I1~SP-I13) + 批量移动 (MV-I1~MV-I5) |
 | `internal/service` | `bind_test.go` | B1–B8 |
-| `internal/service` | `sync_test.go` | S1–S8 |
+| `internal/service` | `sync_test.go` | S1–S8、软删除同步 (D7/D8)、空间同步 (SP-S1/SP-S2) |
 | `internal/service` | `edge_test.go` | X1–X7 及扩展 |
 
 运行方式：
@@ -146,6 +150,92 @@ mkdir $local
 - **操作**：`RemoteURL(path)`
 - **预期**：返回 `"https://example.com/repo.git"`
 - **无 remote 时**：返回空字符串
+
+---
+
+## 一 · A、Git 后端切换与 go-git 实现（14 个用例）
+
+底层 Git 操作抽象出 `Backend` 接口，保留旧的 `exec` 后端（调用本机 `git` 命令），新增 `go-git` 后端（基于 `github.com/go-git/go-git/v5`，纯 Go 实现）。通过 `pwdmgr.config.json` 中的 `git_client` 字段选择后端，缺省/未知值回退为 `"exec"`。
+
+### BK1 — Normalize 规范化后端名 🤖
+
+- **自动化**：`TestBK1_Normalize` @ `internal/git/backend_test.go`
+- **覆盖**：空串 / `"exec"` / `"EXEC"` / `"system"` / `"cli"` → `exec`；`"go-git"` / `"gogit"` / `"go_git"` / `"go-git-v5"` → `go-git`；未知值回退 `exec`
+
+### BK2 — 默认后端是 exec 🤖
+
+- **自动化**：`TestBK2_DefaultBackendIsExec` @ `internal/git/backend_test.go`
+- **预期**：显式 `SetBackend("")` 后，`CurrentBackend()` 返回 `"exec"`
+
+### BK3 — SetBackend 切换 exec / go-git 🤖
+
+- **自动化**：`TestBK3_SetBackend` @ `internal/git/backend_test.go`
+- **覆盖**：`exec ↔ go-git` 正常切换，未知值静默回退 `exec`
+
+### BK4 — SetBackendStrict 严格校验 🤖
+
+- **自动化**：`TestBK4_SetBackendStrict` @ `internal/git/backend_test.go`
+- **覆盖**：合法值不报错；空串等价默认；未知值返回携带原值的错误
+
+### CFG-GC1 — config.NormalizeGitClient 规范化 🤖
+
+- **自动化**：`TestCFGGC1_NormalizeGitClient` @ `internal/config/config_test.go`
+- **覆盖**：与 `git.Normalize` 一致的回退规则，保证 config 层和 git 层命名一致
+
+### CFG-GC2 — Load 读取 git_client 字段 🤖
+
+- **自动化**：`TestCFGGC2_LoadReadsGitClient` @ `internal/config/config_test.go`
+- **覆盖**：json 中缺失字段、显式 `exec` / `go-git`、未知值回退、大小写兼容；并验证 `Snapshot().GitClient` 同步更新
+
+### GG1 — go-git Init + IsGitRepo 🤖
+
+- **自动化**：`TestGG1_InitAndIsGitRepo` @ `internal/git/gogit_test.go`
+- **预期**：`PlainInit` 创建 `.git`，`IsGitRepo` 返回 true
+
+### GG2 — go-git AddRemote 首次 + 重复覆盖 🤖
+
+- **自动化**：`TestGG2_AddRemote_FirstThenOverride` @ `internal/git/gogit_test.go`
+- **预期**：首次 `AddRemote` 成功；重复添加不报错且 URL 被更新
+
+### GG3 — go-git Commit 🤖
+
+- **自动化**：`TestGG3_Commit` @ `internal/git/gogit_test.go`
+- **预期**：提交后 `CurrentBranch` 返回 `main` 或 `master`
+
+### GG4 — go-git HasChanges 🤖
+
+- **自动化**：`TestGG4_HasChanges` @ `internal/git/gogit_test.go`
+- **覆盖**：干净仓库、修改已跟踪文件、恢复后新增未跟踪文件
+
+### GG5 — go-git RestoreFile 恢复已跟踪文件 🤖
+
+- **自动化**：`TestGG5_RestoreFile` @ `internal/git/gogit_test.go`
+- **预期**：`RestoreFile` 把文件内容还原为 HEAD 版本
+
+### GG6 — go-git Push 首次推送到空 bare 远程 🤖
+
+- **自动化**：`TestGG6_Push_FirstTime` @ `internal/git/gogit_test.go`
+- **预期**：Push 成功，`RemoteHasCommit` 返回 true（空远程时兼容 `ErrEmptyRemoteRepository`）
+
+### GG7 — go-git Pull 回退：本地无 HEAD 🤖
+
+- **自动化**：`TestGG7_Pull_FallbackNoTrackingBranch` @ `internal/git/gogit_test.go`
+- **预期**：`PlainInit + AddRemote` 后 Pull 能正确 checkout 远程默认分支，并拉取文件到工作区
+
+### GG8 — go-git Pull fast-forward 场景 🤖
+
+- **自动化**：`TestGG8_Pull_FastForward` @ `internal/git/gogit_test.go`
+- **预期**：两个本地仓库交替 push/pull，Pull 端能 fast-forward 到最新文件
+
+### GG9 — go-git 远程元信息组合 🤖
+
+- **自动化**：`TestGG9_RemoteMetadata` @ `internal/git/gogit_test.go`
+- **覆盖**：`HasOriginRemote` / `RemoteURL` / `RemoteHasCommit` 在无 remote / 有 remote / 有远程提交时的返回
+
+### GG10 — 顶层 API 经 SetBackend 切到 go-git 后可用 🤖
+
+- **自动化**：`TestGG10_TopLevelDispatchViaGoGit` @ `internal/git/gogit_test.go`
+- **预期**：`SetBackend("go-git")` 后直接调用包级 `Init / AddRemote / Commit / Push / RemoteHasCommit` 仍能完成端到端推送
 
 ---
 
@@ -461,6 +551,305 @@ mkdir $local
 
 ---
 
+## 九、软删除（8 个用例）
+
+> 背景：合并逻辑无法区分"本地删除"和"远程新增"，会导致本地删除的条目同步后被远程旧版本"复活"。
+> 设计：`Entry` 新增 `DeletedAt int64` 字段；`DeleteEntry` 改为软删除（打标记 + 刷新 `UpdatedAt`）；
+> 合并时仍按 `UpdatedAt` 取较新一方，天然保留删除标记；`ListEntries` 在 service 层过滤 `DeletedAt > 0` 的条目。
+
+### D1 — 软删除打标记 🤖
+
+- **自动化**：`TestVault_DeleteEntry_SoftDelete` @ `internal/vault/vault_test.go`
+- **操作**：`NewVault` → 添加两个条目 → `DeleteEntry(e2.ID)`
+- **预期**：
+  - `v.Entries` 长度仍为 2（物理上保留）
+  - 被删条目 `DeletedAt > 0` 且与 `UpdatedAt` 相等
+  - 另一条目 `IsDeleted()` 为 false
+
+### D1b — ActiveEntries 过滤软删除 🤖
+
+- **自动化**：`TestVault_ActiveEntries_FilterDeleted` @ `internal/vault/vault_test.go`
+- **操作**：添加 2 条目 → 删除其中一个 → `v.ActiveEntries()`
+- **预期**：返回 1 条（未删除的那条）
+
+### D1c — DeleteEntry 对已删除条目幂等 🤖
+
+- **自动化**：`TestVault_DeleteEntry_Idempotent` @ `internal/vault/vault_test.go`
+- **操作**：`DeleteEntry(id)` 两次
+- **预期**：第二次调用不覆盖 `DeletedAt`（保持首次删除的时间戳）
+
+### D2 — 合并：本地软删除胜出旧远程 🤖
+
+- **自动化**：`TestMergeVault_LocalDelete_BeatsOlderRemote` @ `internal/vault/vault_test.go`
+- **前置**：local 有 X（`UpdatedAt=200, DeletedAt=200`），remote 有 X（`UpdatedAt=100`，无删除标记）
+- **操作**：`MergeVault(local, remote)`
+- **预期**：合并结果只有 1 条，且保留 `DeletedAt=200`，不会被远程旧版本复活
+
+### D3 — 合并：远程更新胜出本地删除（恢复条目）🤖
+
+- **自动化**：`TestMergeVault_NewerRemoteUpdate_OverridesLocalDelete` @ `internal/vault/vault_test.go`
+- **前置**：local 有 X（`UpdatedAt=100, DeletedAt=100`），remote 有 X（`UpdatedAt=200`，无删除标记）
+- **操作**：`MergeVault(local, remote)`
+- **预期**：合并结果取远程版本，`IsDeleted()=false`，`UpdatedAt=200`
+
+### D4 — 合并：本地软删除，远程从未有过该条目 🤖
+
+- **自动化**：`TestMergeVault_LocalDelete_RemoteMissing` @ `internal/vault/vault_test.go`
+- **前置**：local 有 X（`DeletedAt=200`），remote 为空
+- **操作**：`MergeVault(local, remote)`
+- **预期**：合并结果保留带删除标记的 X，确保下次同步能把删除传播到远程
+
+### D5 — ListEntries 过滤软删除条目 🤖
+
+- **自动化**：`TestD5_ListEntries_FiltersSoftDeleted` @ `internal/service/entries_test.go`
+- **操作**：`AddEntry` 两条 → `DeleteEntry` 其中一条 → `ListEntries`
+- **预期**：
+  - `ListEntries` 仅返回未删除那条（长度 1）
+  - 磁盘加密文件中仍保留两条（其中一条带 `DeletedAt`）
+
+### D6 — UpdateEntry 拒绝软删除条目（防复活）🤖
+
+- **自动化**：`TestD6_UpdateEntry_SoftDeletedReturnsError` @ `internal/service/entries_test.go`
+- **前置**：条目已被软删除
+- **操作**：用原 ID 调用 `UpdateEntry`
+- **预期**：返回错误 `"条目不存在"`，`DeletedAt` 状态不被前端误传清除
+
+### D7 — SyncVault 软删除传播且不被远程复活 🤖
+
+- **自动化**：`TestD7_SyncVault_SoftDeletePropagates` @ `internal/service/sync_test.go`
+- **前置**：远程初始有条目 X（`UpdatedAt=50`），本地绑定拉取
+- **操作**：
+  1. 本地 `DeleteEntry("x")`（软删除）
+  2. `SyncVault`（推送删除标记）
+  3. 再次 `SyncVault`
+- **预期**：
+  - 本地 `ListEntries` 始终为空（不可见）
+  - 克隆远程后 vault 内仍有 1 条 X，但 `IsDeleted()=true`（标记已传播）
+  - 第二次 Sync 不会把远程旧版本"复活"
+
+### D8 — SyncVault 远程更新更晚则恢复条目 🤖
+
+- **自动化**：`TestD8_SyncVault_NewerRemoteUpdateRestoresDeleted` @ `internal/service/sync_test.go`
+- **前置**：
+  - 远程原有 X（`UpdatedAt=50`）
+  - 本地删除 X（`DeletedAt=100, UpdatedAt=100`）
+  - 另一设备在 `UpdatedAt=300` 修改 X 的密码为 `"restored"`
+- **操作**：`SyncVault`
+- **预期**：合并后本地 `ListEntries` 返回 1 条，`Password="restored"`、`UpdatedAt=300`、`IsDeleted()=false`
+
+---
+
+## 十、多空间支持（25 个用例）
+
+> 背景：Vault 增加 `Spaces` 列表；每个 `Entry` 带 `SpaceID`，前端按空间隔离展示。
+> 默认空间 ID 固定为 `default`，不可删除/不可重命名；合并时 `Spaces` 同样按 `UpdatedAt` 取较新一方，支持软删除。
+> 旧版本 vault.dat（无 `Spaces` 字段、无 `SpaceID` 的条目）加载时由 `EnsureDefaultSpace` 自动迁移到默认空间。
+
+### 10.1 模型与合并（自动化，vault 层）
+
+#### SP1 — NewVault 自动包含默认空间 🤖
+- **自动化**：`TestNewVault_HasDefaultSpace` @ `internal/vault/vault_test.go`
+- **预期**：`NewVault().ActiveSpaces()` 长度为 1，ID = `default`，`Name` = `默认空间`
+
+#### SP2 — NewEntry / NewEntryInSpace 正确归属空间 🤖
+- **自动化**：`TestNewEntry_DefaultSpaceAssigned` @ `internal/vault/vault_test.go`
+- **预期**：`NewEntry` 默认 `SpaceID=default`；`NewEntryInSpace("work", …)` 得 `work`；空字符串回退默认
+
+#### SP3 — AddSpace 名称去空格 / 重名 / 空名校验 🤖
+- **自动化**：`TestVault_AddSpace` @ `internal/vault/vault_test.go`
+- **预期**：添加重复（活跃）同名 → `ErrSpaceNameDuplicate`；全空白 → `ErrSpaceNameEmpty`
+
+#### SP4 — RenameSpace 规则 🤖
+- **自动化**：`TestVault_RenameSpace` @ `internal/vault/vault_test.go`
+- **预期**：默认空间 → `ErrSpaceProtected`；同名 → `ErrSpaceNameDuplicate`；空名 → `ErrSpaceNameEmpty`；不存在 → `ErrSpaceNotFound`；正常重命名后 `UpdatedAt` 刷新
+
+#### SP5 — DeleteSpace 规则 🤖
+- **自动化**：`TestVault_DeleteSpace` @ `internal/vault/vault_test.go`
+- **预期**：默认空间 → `ErrSpaceProtected`；含活跃条目 → `ErrSpaceNotEmpty`；空空间 → 成功软删除；再次删除同 ID → `ErrSpaceNotFound`
+
+#### SP6 — EntriesInSpace 过滤 🤖
+- **自动化**：`TestVault_EntriesInSpace` @ `internal/vault/vault_test.go`
+- **预期**：返回指定空间下未软删除的条目；空 `spaceID` 视作默认空间
+
+#### SP7 — EnsureDefaultSpace 迁移旧 vault 🤖
+- **自动化**：`TestVault_EnsureDefaultSpace_MigratesLegacy` @ `internal/vault/vault_test.go`
+- **前置**：手工构造 `Vault{Spaces: nil, Entries: [{SpaceID: ""}, …]}`
+- **预期**：调用 `EnsureDefaultSpace` 后 `Spaces` 含默认空间，所有无 `SpaceID` 的条目被归入默认空间
+
+#### SP8 — Merge 新增/保留空间 🤖
+- **自动化**：`TestMergeVault_MergesSpaces` @ `internal/vault/vault_test.go`
+- **前置**：本地独有 `work` 空间；远程独有 `personal` 空间
+- **预期**：合并结果包含默认 + work + personal 三个空间
+
+#### SP9 — Merge 空间冲突取较新者 🤖
+- **自动化**：`TestMergeVault_SpaceConflict_NewerWins` @ `internal/vault/vault_test.go`
+- **前置**：同 ID 的 Space 双端 `UpdatedAt` 不同
+- **预期**：`UpdatedAt` 更大一方的 `Name` 胜出
+
+#### SP10 — Merge 软删除空间胜出 🤖
+- **自动化**：`TestMergeVault_DeletedSpace_BeatsOlderRemote` @ `internal/vault/vault_test.go`
+- **前置**：本地 `Space{DeletedAt=200, UpdatedAt=200}` + 远程 `Space{UpdatedAt=100}`
+- **预期**：合并结果保留删除标记，与条目软删除逻辑一致
+
+### 10.2 service 层集成（自动化）
+
+#### SP-I1 — 初始化后 ListSpaces 仅含默认空间 🤖
+- **自动化**：`TestSPI1_ListSpaces_DefaultOnly` @ `internal/service/spaces_test.go`
+
+#### SP-I2 — CreateSpace + ListSpaces 排序（默认空间置顶）🤖
+- **自动化**：`TestSPI2_CreateSpace_ListOrder` @ `internal/service/spaces_test.go`
+
+#### SP-I3 — CreateSpace 重复名称被拒绝 🤖
+- **自动化**：`TestSPI3_CreateSpace_DuplicateName` @ `internal/service/spaces_test.go`
+- **预期**：返回 `ErrSpaceNameDuplicate`
+
+#### SP-I4 — RenameSpace 默认空间受保护 🤖
+- **自动化**：`TestSPI4_RenameSpace_ProtectDefault` @ `internal/service/spaces_test.go`
+
+#### SP-I5 — RenameSpace 正常流程 🤖
+- **自动化**：`TestSPI5_RenameSpace_Success` @ `internal/service/spaces_test.go`
+
+#### SP-I6 — DeleteSpace 非空空间拒绝 🤖
+- **自动化**：`TestSPI6_DeleteSpace_NotEmptyRejected` @ `internal/service/spaces_test.go`
+- **预期**：返回 `ErrSpaceNotEmpty`
+
+#### SP-I7 — DeleteSpace 默认空间受保护 🤖
+- **自动化**：`TestSPI7_DeleteSpace_ProtectDefault` @ `internal/service/spaces_test.go`
+
+#### SP-I8 — DeleteSpace 空空间软删除成功 🤖
+- **自动化**：`TestSPI8_DeleteSpace_EmptySuccess` @ `internal/service/spaces_test.go`
+- **预期**：`ListSpaces` 中不再出现已删除空间
+
+#### SP-I9 — AddEntry 指定空间 + ListEntries 空间隔离 🤖
+- **自动化**：`TestSPI9_AddAndListBySpace` @ `internal/service/spaces_test.go`
+- **预期**：工作、个人、默认空间下的条目互不混淆
+
+#### SP-I10 — AddEntry / ListEntries 空间不存在时报错 🤖
+- **自动化**：`TestSPI10_InvalidSpaceRejected` @ `internal/service/spaces_test.go`
+- **预期**：错误信息包含 "空间不存在"
+
+#### SP-I11 — UpdateEntry 跨空间移动条目 🤖
+- **自动化**：`TestSPI11_UpdateEntry_MoveBetweenSpaces` @ `internal/service/spaces_test.go`
+- **预期**：将条目 `space_id` 改为另一个空间并 `UpdateEntry` 后，源空间 `ListEntries` 为空、目标空间能看到
+
+#### SP-I12 — UpdateEntry 目标空间不存在被拒绝 🤖
+- **自动化**：`TestSPI12_UpdateEntry_InvalidTargetSpace` @ `internal/service/spaces_test.go`
+
+#### SP-I13 — 旧 vault.dat 加载后自动迁移 🤖
+- **自动化**：`TestSPI13_LegacyVaultMigration` @ `internal/service/spaces_test.go`
+- **前置**：直接写入一个不含 `Spaces` 字段的 vault.dat
+- **预期**：`ListEntries` / `ListSpaces` 均可用，旧条目归入默认空间
+
+### 10.3 同步场景（自动化）
+
+#### SP-S1 — 不同空间各自合并，互不干扰 🤖
+- **自动化**：`TestSPS1_SyncVault_DifferentSpacesMergeIndependently` @ `internal/service/sync_test.go`
+- **前置**：本地新增「工作」空间 + 条目；远程（另一设备）新增「个人」空间 + 条目
+- **预期**：Sync 后本地 `ListSpaces` 含三空间；工作/个人空间下条目独立
+
+#### SP-S2 — 远程删除的空间同步到本地后被过滤 🤖
+- **自动化**：`TestSPS2_SyncVault_RemoteDeletedSpaceHidden` @ `internal/service/sync_test.go`
+- **前置**：本地创建并 Sync 了「存档」空间；远程将该空间 `DeletedAt` 设为更晚时间
+- **预期**：再次 Sync 后 `ListSpaces` 不再包含该空间
+
+### 10.4 批量移动（9 个用例）
+
+> 能力：单条或一次移动多条条目到另一空间。service 层的 `MoveEntries(ids, targetSpaceID)` 保证：
+> 目标空间必须存在且未删除；已软删除、已在目标空间、不存在的 ID 会被静默跳过；返回实际被移动的数量。
+> 被移动的条目会刷新 `UpdatedAt`，在后续合并中正确传播到其它设备。
+
+#### MV1 — MoveEntries 基本流程 🤖
+- **自动化**：`TestVault_MoveEntries_Basic` @ `internal/vault/vault_test.go`
+- **预期**：返回移动数量，被移动的 `SpaceID` 改变且 `UpdatedAt` 刷新；未指定条目不受影响
+
+#### MV2 — 目标空间为空回退默认空间 🤖
+- **自动化**：`TestVault_MoveEntries_EmptyTargetFallsBackToDefault` @ `internal/vault/vault_test.go`
+- **预期**：`MoveEntries(ids, "")` 相当于移动到 `default`
+
+#### MV3 — 静默跳过无效条目 🤖
+- **自动化**：`TestVault_MoveEntries_SkipsInvalidEntries` @ `internal/vault/vault_test.go`
+- **预期**：已在目标空间 / 已软删除 / 不存在的 ID 均被跳过，不计入返回值，也不会改动对应条目
+
+#### MV4 — 空 ID 列表为 no-op 🤖
+- **自动化**：`TestVault_MoveEntries_EmptyIDs` @ `internal/vault/vault_test.go`
+- **预期**：`MoveEntries(nil, target)` 返回 0，不修改任何条目
+
+#### MV-I1 — service 层批量移动 🤖
+- **自动化**：`TestMVI1_MoveEntries_Batch` @ `internal/service/spaces_test.go`
+- **预期**：`ListEntries(default)` 减少，`ListEntries(work)` 相应增加
+
+#### MV-I2 — service 层单条移动（ids 长度为 1）🤖
+- **自动化**：`TestMVI2_MoveEntries_Single` @ `internal/service/spaces_test.go`
+- **预期**：前端"单条移动"复用同一 API 即可
+
+#### MV-I3 — 目标空间不存在时报错 🤖
+- **自动化**：`TestMVI3_MoveEntries_TargetNotFound` @ `internal/service/spaces_test.go`
+- **预期**：错误信息含 "空间不存在"
+
+#### MV-I4 — 空 ID 列表不报错 🤖
+- **自动化**：`TestMVI4_MoveEntries_EmptyIDs` @ `internal/service/spaces_test.go`
+- **预期**：`MoveEntries(repo, pwd, nil, target)` 与 `[]string{}` 均返回 `(0, nil)`
+
+#### MV-I5 — 部分 ID 合法仍能成功保存 🤖
+- **自动化**：`TestMVI5_MoveEntries_PartialValid` @ `internal/service/spaces_test.go`
+- **预期**：真实移动数 = 1，ghost ID 被忽略；vault.dat 正常写回
+
+### 10.5 手工测试（🖱️）
+
+#### SP-E1 — 解锁后看到空间切换器 🖱️
+- **操作**：解锁保险库
+- **预期**：顶部看到"默认空间"chip，旁边有 "+" 按钮
+- **验证**：当前空间名称显示在条目数量说明行中
+
+#### SP-E2 — 新建空间 🖱️
+- **操作**：点击 "+" → 输入名称"工作" → 保存
+- **预期**：tabs 中新增"工作" chip，自动切换到该空间；条目列表为空
+- **验证**：`ListVaultSpaces` 下次返回含"工作"
+
+#### SP-E3 — 在空间下新增条目 🖱️
+- **操作**：在"工作"空间点击"添加条目"，填写并保存
+- **预期**：条目仅在"工作"空间可见；切回"默认空间"后看不到
+
+#### SP-E4 — 重命名空间 🖱️
+- **操作**：选中非默认空间 → 点击 "重命名" → 输入新名 → 保存
+- **预期**：tab 上显示新名；默认空间不显示"重命名"按钮
+
+#### SP-E5 — 删除空间 🖱️
+- **操作 A**：删除非空空间 → 预期错误提示"空间下仍有条目"
+- **操作 B**：清空条目后再删除 → 成功，自动切回默认空间
+- **操作 C**：默认空间不显示"删除"按钮
+
+#### SP-E6 — 多设备同步空间 🖱️
+- **操作**：设备 A 新建"工作"空间并添加条目 → Sync → 设备 B Sync
+- **预期**：设备 B 解锁后空间切换器中出现"工作"，切过去能看到条目
+
+#### MV-E1 — 单条"移动"按钮 🖱️
+- **操作**：鼠标移入任一条目卡片 → 点击 footer 的"移动"按钮
+- **预期**：弹出"移动到空间"对话框，列出除当前空间外的所有空间；选择后条目消失于源空间，出现在目标空间
+
+#### MV-E2 — 进入/退出批量选择模式 🖱️
+- **操作**：点击工具栏的"批量选择"图标按钮
+- **预期**：搜索栏被选择工具栏替代，显示"已选 0 条 / 全选当前 / 移动到… / 完成"；条目卡片出现复选框，hover 行为变为"整张卡片可点击切换选中"；条目 footer 隐藏；点击"完成"或切换空间退出选择模式并清空已选
+
+#### MV-E3 — 全选/反选当前视图 🖱️
+- **操作**：进入选择模式，先用搜索或标签筛选出部分条目 → 点击"全选当前"
+- **预期**：选中数等于筛选后数量；再次点击变为"取消全选"并清空已选（仅限当前视图内）
+
+#### MV-E4 — 批量移动 🖱️
+- **操作**：选中若干条目 → 点击"移动到…" → 选择目标空间
+- **预期**：提示"已移动 N 条"，条目从当前空间列表消失；自动退出选择模式；切到目标空间能看到它们；工作流对只选 1 条时同样生效
+
+#### MV-E5 — 源空间唯一时的提示 🖱️
+- **前置**：只有"默认空间"（未创建其它空间）
+- **操作**：对任意条目点击"移动"或批量"移动到…"
+- **预期**：提示"没有其它空间可用，请先新建一个空间"（不会打开空对话框）
+
+#### MV-E6 — 跨设备验证移动传播 🖱️
+- **操作**：设备 A 将条目从"默认空间"移动到"工作"空间 → Sync；设备 B Sync
+- **预期**：设备 B 在"工作"空间能看到这些条目，"默认空间"下看不到（`UpdatedAt` 刷新保证合并中胜出）
+
+---
+
 ## 推荐执行顺序
 
 按依赖关系排列，前面的用例是后面的前置条件：
@@ -474,12 +863,24 @@ mkdir $local
  6. B8           → 双空初始化（最简单路径）
  7. B1, B2       → 本地有数据推送到远程
  8. B3, B4       → 远程有数据拉取到本地
- 9. B5~B7        → 合并场景
-10. S1~S4        → 日常同步
-11. S5, S7       → 错误恢复与工作区清理
-12. S6, S8       → 首次同步与边界
-13. E1~E4        → 端到端完整流程（🖱️ 手工）
-14. X1~X7        → 边界异常
+ 9. BK1~BK4      → git 后端规范化与切换
+10. GG1~GG10     → go-git 后端功能对等验证
+11. CFG-GC1~CFG-GC2 → git_client 配置解析
+12. B5~B7        → 合并场景
+13. S1~S4        → 日常同步
+14. S5, S7       → 错误恢复与工作区清理
+15. S6, S8       → 首次同步与边界
+16. D1~D4        → 软删除模型与合并
+17. D5~D8        → 软删除 service/sync 集成
+18. SP1~SP10     → 多空间模型与合并
+19. SP-I1~SP-I13 → 多空间 service 层集成
+20. SP-S1/SP-S2  → 多空间同步场景
+21. MV1~MV4      → 批量移动模型
+22. MV-I1~MV-I5  → 批量移动 service 集成
+23. E1~E4        → 端到端完整流程（🖱️ 手工）
+24. SP-E1~SP-E6  → 多空间前端端到端（🖱️ 手工）
+25. MV-E1~MV-E6  → 批量移动前端（🖱️ 手工）
+26. X1~X7        → 边界异常
 ```
 
 **核心验证点**：每次操作后检查 vault.dat 能用正确密码解密，且条目数据完整不丢失。
@@ -491,14 +892,25 @@ mkdir $local
 | 类别 | 总数 | 🤖 自动化 | 🖱️ 手工 |
 |------|------|-----------|----------|
 | git 层 (G) | 11 | 11 | 0 |
+| git 后端切换 (BK) | 4 | 4 | 0 |
+| go-git 后端 (GG) | 10 | 10 | 0 |
+| config git_client (CFG-GC) | 2 | 2 | 0 |
 | BindRemoteRepo (B) | 8 | 8 | 0 |
 | SyncVault (S) | 8 | 8 | 0 |
 | InitLocalVault (I) | 4 | 4 | 0 |
 | RepoStatus (R) | 4 | 4 | 0 |
 | ListEntries (L) | 2 | 2 | 0 |
+| 软删除 (D) | 8 | 8 | 0 |
+| 多空间 模型 (SP) | 10 | 10 | 0 |
+| 多空间 service (SP-I) | 13 | 13 | 0 |
+| 多空间 同步 (SP-S) | 2 | 2 | 0 |
+| 多空间 前端 (SP-E) | 6 | 0 | 6 |
+| 批量移动 模型 (MV) | 4 | 4 | 0 |
+| 批量移动 service (MV-I) | 5 | 5 | 0 |
+| 批量移动 前端 (MV-E) | 6 | 0 | 6 |
 | 端到端 (E) | 4 | 0 | 4 |
 | 边界异常 (X) | 7 | 7 | 0 |
-| **合计** | **48** | **44** | **4** |
+| **合计** | **118** | **102** | **16** |
 
 ---
 
@@ -509,3 +921,7 @@ mkdir $local
 | 初版 | 32 个用例覆盖 git 层、BindRepo、SyncVault、InitLocalVault、端到端、异常 |
 | 更新 | 新增 G7~G11（git 工具函数）、I4（空路径）、S7~S8（工作区清理/空路径）、R1~R4（RepoStatus）、L1~L2（空数组）、X6~X7（空参数）；修正 I1/I3 补充自动提交验证、B2 描述更正为已提交、S1/S2 补充 HasChanges 分支说明、B6 补充合并机制说明 |
 | 自动化 | 为 44 个用例编写 Go 自动化测试代码（11 个 `_test.go` 文件），标注 4 个端到端用例为手工 GUI 测试；修复 BindRemoteRepo 重复绑定时工作区未清理的 bug |
+| 软删除 | Entry 增加 `DeletedAt`，`DeleteEntry` 改为软删除，`ListEntries` 过滤删除条目，`UpdateEntry` 拒绝已软删除 ID；合并逻辑保持不变（仍按 `UpdatedAt` 比较），解决"本地删除同步后被远程复活"问题；新增 D1~D8 共 8 个自动化用例（模型 + 合并 + service 集成 + sync 端到端） |
+| 多空间 | Vault 增加 `Spaces` 列表、Entry 增加 `SpaceID`；新增 `Space` CRUD（默认空间受保护、非空空间禁止删除、同名检测、软删除）；`MergeVault` 按同一 `UpdatedAt` 规则合并空间，支持软删除传播；`service.ListEntries` 增加 `spaceID` 参数并过滤；新增 `ListSpaces / CreateSpace / RenameSpace / DeleteSpace` service 与 Wails API；旧版本 vault.dat 由 `EnsureDefaultSpace` 自动迁移到默认空间；前端 VaultTab 新增空间切换器与管理 UI。自动化新增 SP1~SP10（vault 模型/合并）、SP-I1~SP-I13（service）、SP-S1/SP-S2（同步），以及 SP-E1~SP-E6 手工用例，共 31 个新用例 |
+| Git 后端抽象 | `internal/git` 抽出 `Backend` 接口，保留原有基于 `os/exec` 的 `execBackend`，新增基于 `github.com/go-git/go-git/v5` 的 `goGitBackend`（纯 Go 实现，不依赖本机 git）；`SetBackend / CurrentBackend` 允许运行时切换；`internal/config.Config` 增加 `git_client` 字段（`exec` / `go-git`，未配置或取值未知时回退 `exec`），`app.Startup / ReloadConfig` 加载配置后自动调用 `git.SetBackend` 同步后端；对外公共 API（`Clone / Pull / Push / Commit / ...`）签名不变，全部通过 dispatcher 调度到当前后端。自动化新增 BK1~BK4（后端切换/规范化）、GG1~GG10（go-git 功能对等）、CFG-GC1~CFG-GC2（配置解析）共 16 个用例 |
+| 批量移动 | Vault 新增 `MoveEntries(ids, targetSpaceID)`，静默跳过无效 ID、对被移动条目刷新 `UpdatedAt` 保证同步胜出；service 层 `MoveEntries` 校验目标空间合法性后写回 vault.dat；Wails 绑定 `MoveVaultEntries(password, targetSpaceID, ids) -> (moved int)`；前端新增 `SpacePickerDialog` 通过 `provide('askSpace')` 提供选择空间的通用能力，EntryCard 增加"移动"按钮、选择模式下的复选框，VaultTab 新增批量选择工具栏（全选当前 / 移动到… / 完成）。自动化新增 MV1~MV4（vault）+ MV-I1~MV-I5（service）共 9 个用例，手工新增 MV-E1~MV-E6 共 6 个用例 |

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"pwdmgr/internal/config"
+	"pwdmgr/internal/git"
 	"pwdmgr/internal/service"
 	"pwdmgr/internal/vault"
 )
@@ -27,6 +28,16 @@ func NewApp() *App {
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
 	a.cfg, a.cfgErr = config.Load()
+	a.applyGitBackend()
+}
+
+// applyGitBackend 根据当前配置切换 git 包的底层后端；配置未加载时回退默认。
+func (a *App) applyGitBackend() {
+	if a.cfg != nil {
+		git.SetBackend(a.cfg.GitClient)
+		return
+	}
+	git.SetBackend(config.DefaultGitClient)
 }
 
 func (a *App) activeConfig() (*config.Config, error) {
@@ -44,6 +55,7 @@ func (a *App) GetAppConfig() config.Snapshot {
 	if a.cfgErr != nil {
 		return config.Snapshot{
 			ConfigPath:    config.ResolveConfigPath(),
+			GitClient:     config.DefaultGitClient,
 			VaultFileName: config.VaultFileName,
 			LoadError:     a.cfgErr.Error(),
 			SearchPaths:   config.CandidatePaths(),
@@ -54,6 +66,7 @@ func (a *App) GetAppConfig() config.Snapshot {
 	}
 	return config.Snapshot{
 		ConfigPath:    config.ResolveConfigPath(),
+		GitClient:     config.DefaultGitClient,
 		VaultFileName: config.VaultFileName,
 		SearchPaths:   config.CandidatePaths(),
 	}
@@ -64,6 +77,7 @@ func (a *App) ReloadConfig() error {
 	cfg, err := config.Load()
 	a.cfg = cfg
 	a.cfgErr = err
+	a.applyGitBackend()
 	return err
 }
 
@@ -118,20 +132,20 @@ func (a *App) InitLocalVault(password string) error {
 	return service.InitLocalVault(c.RepoRoot, []byte(password))
 }
 
-func (a *App) ListVaultEntries(password string) ([]vault.Entry, error) {
+func (a *App) ListVaultEntries(password, spaceID string) ([]vault.Entry, error) {
 	c, err := a.activeConfig()
 	if err != nil {
 		return nil, err
 	}
-	return service.ListEntries(c.RepoRoot, []byte(password))
+	return service.ListEntries(c.RepoRoot, []byte(password), spaceID)
 }
 
-func (a *App) AddVaultEntry(password, name, username, entryPassword, note string, tags []string) error {
+func (a *App) AddVaultEntry(password, spaceID, name, username, entryPassword, note string, tags []string) error {
 	c, err := a.activeConfig()
 	if err != nil {
 		return err
 	}
-	return service.AddEntry(c.RepoRoot, []byte(password), name, username, entryPassword, note, tags)
+	return service.AddEntry(c.RepoRoot, []byte(password), spaceID, name, username, entryPassword, note, tags)
 }
 
 func (a *App) UpdateVaultEntry(password string, entry vault.Entry) error {
@@ -148,4 +162,50 @@ func (a *App) DeleteVaultEntry(password, id string) error {
 		return err
 	}
 	return service.DeleteEntry(c.RepoRoot, []byte(password), id)
+}
+
+// MoveVaultEntries 批量把指定条目迁到目标空间，返回实际移动数量。
+// ids 长度为 1 时也可用于单条移动场景。
+func (a *App) MoveVaultEntries(password, targetSpaceID string, ids []string) (int, error) {
+	c, err := a.activeConfig()
+	if err != nil {
+		return 0, err
+	}
+	return service.MoveEntries(c.RepoRoot, []byte(password), ids, targetSpaceID)
+}
+
+// ---------------------------------------------------------------------------
+// 空间管理
+// ---------------------------------------------------------------------------
+
+func (a *App) ListVaultSpaces(password string) ([]vault.Space, error) {
+	c, err := a.activeConfig()
+	if err != nil {
+		return nil, err
+	}
+	return service.ListSpaces(c.RepoRoot, []byte(password))
+}
+
+func (a *App) CreateVaultSpace(password, name string) (vault.Space, error) {
+	c, err := a.activeConfig()
+	if err != nil {
+		return vault.Space{}, err
+	}
+	return service.CreateSpace(c.RepoRoot, []byte(password), name)
+}
+
+func (a *App) RenameVaultSpace(password, id, name string) error {
+	c, err := a.activeConfig()
+	if err != nil {
+		return err
+	}
+	return service.RenameSpace(c.RepoRoot, []byte(password), id, name)
+}
+
+func (a *App) DeleteVaultSpace(password, id string) error {
+	c, err := a.activeConfig()
+	if err != nil {
+		return err
+	}
+	return service.DeleteSpace(c.RepoRoot, []byte(password), id)
 }

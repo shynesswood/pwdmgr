@@ -1,21 +1,40 @@
 package git
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 )
 
-func Clone(repoURL, path string) error {
+// execBackend 通过调用本机 `git` 命令实现所有操作。
+// 依赖用户本地已安装 Git。
+type execBackend struct{}
+
+func (execBackend) Name() string { return BackendExec }
+
+// runGitCommand 执行 `git <args...>`，保留 stdout/stderr 合并输出以生成可读错误。
+func runGitCommand(dir string, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return out, fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
+	}
+	return out, nil
+}
+
+func (execBackend) Clone(repoURL, path string) error {
 	_, err := runGitCommand("", "clone", repoURL, path)
 	return err
 }
 
-func Init(path string) error {
+func (execBackend) Init(path string) error {
 	_, err := runGitCommand(path, "init")
 	return err
 }
 
-func Pull(path string) error {
+func (execBackend) Pull(path string) error {
 	_, err := runGitCommand(path, "pull", "--rebase")
 	if err == nil {
 		return nil
@@ -42,7 +61,7 @@ func Pull(path string) error {
 }
 
 // Commit 执行 git add + commit（不 push）。
-func Commit(path, message string) error {
+func (execBackend) Commit(path, message string) error {
 	if _, err := runGitCommand(path, "add", "."); err != nil {
 		return err
 	}
@@ -50,7 +69,7 @@ func Commit(path, message string) error {
 	return err
 }
 
-func Push(path string) error {
+func (execBackend) Push(path string) error {
 	if _, err := runGitCommand(path, "add", "."); err != nil {
 		return err
 	}
@@ -61,12 +80,12 @@ func Push(path string) error {
 	return err
 }
 
-func HasChanges(path string) bool {
+func (execBackend) HasChanges(path string) bool {
 	out, _ := runGitCommand(path, "status", "--porcelain")
 	return len(out) > 0
 }
 
-func AddRemote(path, repoURL string) error {
+func (execBackend) AddRemote(path, repoURL string) error {
 	_, err := runGitCommand(path, "remote", "add", "origin", repoURL)
 	if err != nil {
 		// origin 可能已存在，改为更新 URL
@@ -75,36 +94,34 @@ func AddRemote(path, repoURL string) error {
 	return err
 }
 
-func IsGitRepo(path string) bool {
+func (execBackend) IsGitRepo(path string) bool {
 	_, err := os.Stat(path + "/.git")
 	return err == nil
 }
 
-func RemoteHasCommit(path string) (bool, error) {
+func (execBackend) RemoteHasCommit(path string) (bool, error) {
 	out, err := runGitCommand(path, "ls-remote", "--heads", "origin")
 	if err != nil {
 		return false, err
 	}
-
 	return len(out) > 0, nil
 }
 
-func HasOriginRemote(path string) (bool, error) {
+func (execBackend) HasOriginRemote(path string) (bool, error) {
 	out, err := runGitCommand(path, "remote", "get-url", "origin")
 	if err != nil {
 		return false, nil
 	}
-
 	return len(out) > 0, nil
 }
 
 // RestoreFile 将已跟踪的文件恢复到最后一次提交的版本。
-func RestoreFile(repoRoot, fileName string) {
+func (execBackend) RestoreFile(repoRoot, fileName string) {
 	_, _ = runGitCommand(repoRoot, "checkout", "--", fileName)
 }
 
 // CurrentBranch 返回当前所在分支名。
-func CurrentBranch(path string) string {
+func (execBackend) CurrentBranch(path string) string {
 	out, err := runGitCommand(path, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return ""
@@ -113,7 +130,7 @@ func CurrentBranch(path string) string {
 }
 
 // RemoteURL 返回 origin 远程的 URL。
-func RemoteURL(path string) string {
+func (execBackend) RemoteURL(path string) string {
 	out, err := runGitCommand(path, "remote", "get-url", "origin")
 	if err != nil {
 		return ""

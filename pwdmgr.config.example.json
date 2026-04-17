@@ -1,4 +1,5 @@
 {
   "repo_root": "/绝对路径/到你的密码库-git仓库根目录",
-  "remote_url": "git@github.com:你的用户/远程仓库.git"
+  "remote_url": "git@github.com:你的用户/远程仓库.git",
+  "git_client": "exec"
 }

@@ -18,6 +18,7 @@ import SyncTab from './components/SyncTab.vue'
 import SettingsTab from './components/SettingsTab.vue'
 import PasswordDialog from './components/PasswordDialog.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
+import SpacePickerDialog from './components/SpacePickerDialog.vue'
 import ToastNotification from './components/ToastNotification.vue'
 
 /* ---------- Window chrome ---------- */
@@ -108,9 +109,40 @@ const onConfirmNo = () => {
   if (r) r(false)
 }
 
+/* ---------- Space picker dialog ---------- */
+const dlgSpaceOpen = ref(false)
+const dlgSpaceTitle = ref('')
+const dlgSpaceDesc = ref('')
+const dlgSpaceList = ref([])
+const dlgSpaceExclude = ref('')
+let dlgSpaceResolve = null
+
+const askSpace = ({ title, description = '', spaces = [], excludeSpaceID = '' } = {}) => {
+  return new Promise((resolve) => {
+    dlgSpaceTitle.value = title || '选择目标空间'
+    dlgSpaceDesc.value = description
+    dlgSpaceList.value = Array.isArray(spaces) ? spaces : []
+    dlgSpaceExclude.value = excludeSpaceID
+    dlgSpaceResolve = resolve
+    dlgSpaceOpen.value = true
+  })
+}
+
+const onSpacePick = (id) => {
+  dlgSpaceOpen.value = false
+  const r = dlgSpaceResolve; dlgSpaceResolve = null
+  if (r) r(id)
+}
+const onSpaceCancel = () => {
+  dlgSpaceOpen.value = false
+  const r = dlgSpaceResolve; dlgSpaceResolve = null
+  if (r) r(null)
+}
+
 /* ---------- Provide utilities to children ---------- */
 provide('askPassword', askPassword)
 provide('askConfirm', askConfirm)
+provide('askSpace', askSpace)
 provide('showErr', showErr)
 provide('showSuccess', showSuccess)
 
@@ -297,6 +329,15 @@ onMounted(async () => {
       :message="dlgConfirmMsg"
       @confirm="onConfirmYes"
       @cancel="onConfirmNo"
+    />
+    <SpacePickerDialog
+      :open="dlgSpaceOpen"
+      :title="dlgSpaceTitle"
+      :description="dlgSpaceDesc"
+      :spaces="dlgSpaceList"
+      :exclude-id="dlgSpaceExclude"
+      @confirm="onSpacePick"
+      @cancel="onSpaceCancel"
     />
   </div>
 </template>

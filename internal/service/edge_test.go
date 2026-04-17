@@ -22,12 +22,12 @@ func TestX1_WrongPassword(t *testing.T) {
 	wrongPwd := []byte("wrong-password")
 
 	require.NoError(t, service.InitLocalVault(dir, pwd))
-	require.NoError(t, service.AddEntry(dir, pwd, "Site", "u", "p", "", nil))
+	require.NoError(t, service.AddEntry(dir, pwd, "", "Site", "u", "p", "", nil))
 
-	_, err := service.ListEntries(dir, wrongPwd)
+	_, err := service.ListEntries(dir, wrongPwd, "")
 	assert.Error(t, err, "wrong password should fail decryption")
 
-	entries, err := service.ListEntries(dir, pwd)
+	entries, err := service.ListEntries(dir, pwd, "")
 	require.NoError(t, err, "vault should not be corrupted by wrong password attempt")
 	assert.Len(t, entries, 1)
 }
@@ -70,9 +70,9 @@ func TestX4_EmptyPassword(t *testing.T) {
 	emptyPwd := []byte("")
 
 	require.NoError(t, service.InitLocalVault(dir, emptyPwd))
-	require.NoError(t, service.AddEntry(dir, emptyPwd, "EmptyPwdSite", "u", "p", "", nil))
+	require.NoError(t, service.AddEntry(dir, emptyPwd, "", "EmptyPwdSite", "u", "p", "", nil))
 
-	entries, err := service.ListEntries(dir, emptyPwd)
+	entries, err := service.ListEntries(dir, emptyPwd, "")
 	require.NoError(t, err)
 	assert.Len(t, entries, 1)
 	assert.Equal(t, "EmptyPwdSite", entries[0].Name)
@@ -130,7 +130,7 @@ func TestX7_PullPush_EmptyPath(t *testing.T) {
 func TestX_SyncVault_WrongPassword(t *testing.T) {
 	requireGit(t)
 	local, _ := setupBoundRepo(t)
-	require.NoError(t, service.AddEntry(local, testPassword, "S", "u", "p", "", nil))
+	require.NoError(t, service.AddEntry(local, testPassword, "", "S", "u", "p", "", nil))
 
 	err := service.SyncVault(local, []byte("wrong"))
 	assert.Error(t, err, "sync with wrong password should fail on LoadVault")
