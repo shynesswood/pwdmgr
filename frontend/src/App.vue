@@ -3,6 +3,7 @@ import { ref, computed, provide, onMounted, onUnmounted, nextTick } from 'vue'
 import {
   GetAppConfig,
   ReloadConfig,
+  UpdateAppConfig,
   GetRepoStatus,
   Pull,
   Push,
@@ -167,6 +168,23 @@ const doReloadConfig = async () => {
   }
 }
 
+// 保存设置页编辑的配置：仓库路径 / 远程 URL / Git 客户端。
+// 任意一项变更都会触发仓库后端切换，为安全起见先锁定 vault。
+const doSaveAppConfig = async ({ repo_root, remote_url, git_client }) => {
+  vaultTabRef.value?.lockVault()
+  try {
+    const snapshot = await UpdateAppConfig(repo_root || '', remote_url || '', git_client || 'exec')
+    appConfig.value = snapshot
+    await loadStatus()
+    showSuccess('配置已保存')
+  } catch (e) {
+    // 回填磁盘状态避免 UI 与后端不一致
+    await refreshAppConfig()
+    showErr(e)
+    throw e
+  }
+}
+
 /* ---------- Sync operations ---------- */
 const doPull = async () => {
   syncing.value = true
@@ -305,6 +323,7 @@ onMounted(async () => {
       <SettingsTab
         v-show="activeTab === 'settings'"
         :app-config="appConfig"
+        :on-save="doSaveAppConfig"
         @reload="doReloadConfig"
       />
     </main>

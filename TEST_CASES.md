@@ -19,7 +19,8 @@
 | `internal/git` | `git_test.go` | G1–G11（exec 后端） |
 | `internal/git` | `backend_test.go` | BK1–BK4（后端切换/规范化） |
 | `internal/git` | `gogit_test.go` | GG1–GG10（go-git 后端） |
-| `internal/config` | `config_test.go` | CFG-GC1 / CFG-GC2（git_client 字段解析） |
+| `internal/config` | `config_test.go` | CFG-GC1 / CFG-GC2（git_client 解析）、CFG-SV1~CFG-SV4（Save 写回） |
+| `internal/app` | `app_test.go` | APP-UC1~APP-UC5（UpdateAppConfig 校验 + 写盘 + 切后端） |
 | `internal/service` | `init_test.go` | I1–I4 |
 | `internal/service` | `status_test.go` | R1–R4 |
 | `internal/service` | `entries_test.go` | L1–L2、CRUD 集成、软删除 (D5/D6) |
@@ -236,6 +237,81 @@ mkdir $local
 
 - **自动化**：`TestGG10_TopLevelDispatchViaGoGit` @ `internal/git/gogit_test.go`
 - **预期**：`SetBackend("go-git")` 后直接调用包级 `Init / AddRemote / Commit / Push / RemoteHasCommit` 仍能完成端到端推送
+
+---
+
+## 一 · B、界面编辑应用配置（9 个用例）
+
+`SettingsTab` 提供编辑/保存表单，后端 `UpdateAppConfig(repoRoot, remoteURL, gitClient) -> Snapshot` 会原子写回配置文件、重新 Load、同步切换 git 后端；`config.Save` 保留未知字段避免吞用户自定义扩展。
+
+### CFG-SV1 — Save 写回三字段并可被 Load 读回 🤖
+
+- **自动化**：`TestCFGSV1_SaveRoundTrip` @ `internal/config/config_test.go`
+- **覆盖**：`Save` 成功后 `Load` 能读回同样的 `repo_root / remote_url / git_client`，且 `Path()` 更新为目标路径
+
+### CFG-SV2 — Save 保留未知字段 🤖
+
+- **自动化**：`TestCFGSV2_SavePreservesUnknownFields` @ `internal/config/config_test.go`
+- **覆盖**：预先写入含 `theme / extra / custom_flag` 等字段的 json，修改 Config 后 Save，未知字段完整保留
+
+### CFG-SV3 — 新建场景自动创建目录 🤖
+
+- **自动化**：`TestCFGSV3_SaveFirstTime` @ `internal/config/config_test.go`
+- **覆盖**：`resolvedPath` 为空时回退 `ResolveConfigPath`，并按需 `MkdirAll`；空 `git_client` 最终落盘为 `exec`
+
+### CFG-SV4 — Save 规范化 git_client 🤖
+
+- **自动化**：`TestCFGSV4_SaveNormalizesGitClient` @ `internal/config/config_test.go`
+- **覆盖**：写入 `"GoGit"` 等变体时，磁盘里落地的是规范名 `go-git`
+
+### CFG-CP1 — CandidatePaths 搜索优先级（可执行目录 > wd > 用户配置目录）🤖
+
+- **自动化**：`TestCFGCP1_CandidatePathsOrder` @ `internal/config/config_test.go`
+- **覆盖**：返回顺序严格为「可执行文件同级 → 当前工作目录 → 用户配置目录」，三者均按是否可解析裁剪
+
+### CFG-CP2 — 工作目录命中优先于用户配置目录 🤖
+
+- **自动化**：`TestCFGCP2_ResolvePrefersWdOverUserDir` @ `internal/config/config_test.go`
+- **覆盖**：当 wd 下存在 `pwdmgr.config.json` 时，`ResolveConfigPath` 返回 wd 路径而不是落到用户配置目录
+
+### APP-UC1 — UpdateAppConfig 要求 repo_root 非空 🤖
+
+- **自动化**：`TestAPPUC1_UpdateAppConfig_RequiresRepoRoot` @ `internal/app/app_test.go`
+- **预期**：空白字符串应返回包含"仓库路径"的错误
+
+### APP-UC2 — UpdateAppConfig 要求绝对路径 🤖
+
+- **自动化**：`TestAPPUC2_UpdateAppConfig_RequiresAbsPath` @ `internal/app/app_test.go`
+- **预期**：相对路径应返回包含"绝对路径"的错误
+
+### APP-UC3 — UpdateAppConfig 拒绝文件路径 🤖
+
+- **自动化**：`TestAPPUC3_UpdateAppConfig_RejectsFilePath` @ `internal/app/app_test.go`
+- **预期**：指向普通文件时应返回包含"文件"的错误，不会覆盖原配置
+
+### APP-UC4 — UpdateAppConfig 正常流程 🤖
+
+- **自动化**：`TestAPPUC4_UpdateAppConfig_Success` @ `internal/app/app_test.go`
+- **预期**：首次 `UpdateAppConfig(repoDir, url, "go-git")` → 文件落盘 + Snapshot 正确 + `git.CurrentBackend()` 变 `go-git`；再改回 `"exec"` 后 backend 同步切回
+
+### APP-UC5 — UpdateAppConfig 未知 git_client 回退 exec 🤖
+
+- **自动化**：`TestAPPUC5_UpdateAppConfig_UnknownGitClientFallsBack` @ `internal/app/app_test.go`
+- **预期**：`"libgit2"` 等未知值保存后 Snapshot 中显示 `exec`，git backend 也保持 `exec`
+
+### CFG-E1 — 设置页编辑 → 保存 → 磁盘同步 🖱️
+
+- **手工**：打开"设置"→ 点"编辑配置"→ 修改 `repo_root` / `remote_url` / 下拉切换 `git_client` → 保存
+- **预期**：
+  1. 顶栏 Toast 提示"配置已保存"
+  2. 退出编辑态，只读视图立即显示最新值
+  3. `pwdmgr.config.json` 内容被原子写回，切出再切回"设置"页字段仍正确
+  4. 若切换了 `git_client`，后续 Sync/Pull/Push 走新的后端
+
+### CFG-E2 — 编辑校验失败保持编辑态 🖱️
+
+- **手工**：在编辑模式把 `repo_root` 清空后保存，或填入相对路径 `./foo`
+- **预期**：Toast 报红提示；页面仍处于编辑态，字段保留用户输入，不会错误退出
 
 ---
 
@@ -866,6 +942,9 @@ mkdir $local
  9. BK1~BK4      → git 后端规范化与切换
 10. GG1~GG10     → go-git 后端功能对等验证
 11. CFG-GC1~CFG-GC2 → git_client 配置解析
+    CFG-SV1~CFG-SV4   → config.Save 原子写回
+    APP-UC1~APP-UC5   → UpdateAppConfig 校验与后端切换
+    CFG-E1 / CFG-E2   → 🖱️ 设置页编辑流程
 12. B5~B7        → 合并场景
 13. S1~S4        → 日常同步
 14. S5, S7       → 错误恢复与工作区清理
@@ -895,6 +974,10 @@ mkdir $local
 | git 后端切换 (BK) | 4 | 4 | 0 |
 | go-git 后端 (GG) | 10 | 10 | 0 |
 | config git_client (CFG-GC) | 2 | 2 | 0 |
+| config.Save (CFG-SV) | 4 | 4 | 0 |
+| 配置搜索路径 (CFG-CP) | 2 | 2 | 0 |
+| UpdateAppConfig (APP-UC) | 5 | 5 | 0 |
+| 设置页编辑 (CFG-E) | 2 | 0 | 2 |
 | BindRemoteRepo (B) | 8 | 8 | 0 |
 | SyncVault (S) | 8 | 8 | 0 |
 | InitLocalVault (I) | 4 | 4 | 0 |
@@ -910,7 +993,7 @@ mkdir $local
 | 批量移动 前端 (MV-E) | 6 | 0 | 6 |
 | 端到端 (E) | 4 | 0 | 4 |
 | 边界异常 (X) | 7 | 7 | 0 |
-| **合计** | **118** | **102** | **16** |
+| **合计** | **131** | **113** | **18** |
 
 ---
 
@@ -924,4 +1007,6 @@ mkdir $local
 | 软删除 | Entry 增加 `DeletedAt`，`DeleteEntry` 改为软删除，`ListEntries` 过滤删除条目，`UpdateEntry` 拒绝已软删除 ID；合并逻辑保持不变（仍按 `UpdatedAt` 比较），解决"本地删除同步后被远程复活"问题；新增 D1~D8 共 8 个自动化用例（模型 + 合并 + service 集成 + sync 端到端） |
 | 多空间 | Vault 增加 `Spaces` 列表、Entry 增加 `SpaceID`；新增 `Space` CRUD（默认空间受保护、非空空间禁止删除、同名检测、软删除）；`MergeVault` 按同一 `UpdatedAt` 规则合并空间，支持软删除传播；`service.ListEntries` 增加 `spaceID` 参数并过滤；新增 `ListSpaces / CreateSpace / RenameSpace / DeleteSpace` service 与 Wails API；旧版本 vault.dat 由 `EnsureDefaultSpace` 自动迁移到默认空间；前端 VaultTab 新增空间切换器与管理 UI。自动化新增 SP1~SP10（vault 模型/合并）、SP-I1~SP-I13（service）、SP-S1/SP-S2（同步），以及 SP-E1~SP-E6 手工用例，共 31 个新用例 |
 | Git 后端抽象 | `internal/git` 抽出 `Backend` 接口，保留原有基于 `os/exec` 的 `execBackend`，新增基于 `github.com/go-git/go-git/v5` 的 `goGitBackend`（纯 Go 实现，不依赖本机 git）；`SetBackend / CurrentBackend` 允许运行时切换；`internal/config.Config` 增加 `git_client` 字段（`exec` / `go-git`，未配置或取值未知时回退 `exec`），`app.Startup / ReloadConfig` 加载配置后自动调用 `git.SetBackend` 同步后端；对外公共 API（`Clone / Pull / Push / Commit / ...`）签名不变，全部通过 dispatcher 调度到当前后端。自动化新增 BK1~BK4（后端切换/规范化）、GG1~GG10（go-git 功能对等）、CFG-GC1~CFG-GC2（配置解析）共 16 个用例 |
+| 设置页编辑配置 | `internal/config.Config` 新增 `Save()`（JSON map 合并 → `tmp + rename` 原子写回，保留未知字段）和 `Path()` / `ResolvedOrCandidatePath()`；`internal/app` 暴露 `UpdateAppConfig(repoRoot, remoteURL, gitClient) -> Snapshot`，做绝对路径 / 非文件 / 空值校验后写盘、重新 Load 并同步切换 git 后端；手工维护的 `frontend/wailsjs/go/app/App.{d.ts,js}` 同步补上 `UpdateAppConfig` 绑定；`SettingsTab.vue` 重写为只读 / 编辑两种模式，`git_client` 使用下拉选择，`App.vue` 提供 `doSaveAppConfig`（保存前自动锁定 vault）。自动化新增 CFG-SV1~CFG-SV4（Save）、APP-UC1~APP-UC5（UpdateAppConfig）共 9 个用例，手工新增 CFG-E1 / CFG-E2 共 2 个 |
+| 配置搜索优先级 | `CandidatePaths()` 搜索顺序调整为「可执行文件同级 → 当前工作目录 → 用户配置目录」（环境变量 `PWDMGR_CONFIG` 仍然最优先），便于便携式部署与 `wails dev` 开发；`ResolveConfigPath` 在所有候选都不存在时仍回退到用户配置目录，保证首次 `Save()` 在 macOS `.app` 场景下可写。README 表格与提示同步更新。自动化新增 CFG-CP1 / CFG-CP2 共 2 个用例 |
 | 批量移动 | Vault 新增 `MoveEntries(ids, targetSpaceID)`，静默跳过无效 ID、对被移动条目刷新 `UpdatedAt` 保证同步胜出；service 层 `MoveEntries` 校验目标空间合法性后写回 vault.dat；Wails 绑定 `MoveVaultEntries(password, targetSpaceID, ids) -> (moved int)`；前端新增 `SpacePickerDialog` 通过 `provide('askSpace')` 提供选择空间的通用能力，EntryCard 增加"移动"按钮、选择模式下的复选框，VaultTab 新增批量选择工具栏（全选当前 / 移动到… / 完成）。自动化新增 MV1~MV4（vault）+ MV-I1~MV-I5（service）共 9 个用例，手工新增 MV-E1~MV-E6 共 6 个用例 |

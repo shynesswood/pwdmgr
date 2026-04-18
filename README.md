@@ -6,7 +6,8 @@
 
 - **端到端加密** — Argon2id 派生密钥 + AES-256-GCM 加密，密码库文件 (`vault.dat`) 以二进制密文形式存储
 - **Git 同步** — 利用任意 Git 远程仓库（GitHub、GitLab、自建 Gitea 等）在多台设备间同步
-- **可切换 Git 后端** — 默认走本机 `git` 命令；也可配置 `git_client: "go-git"` 切到纯 Go 实现，完全免安装 Git
+- **可切换 Git 后端** — 默认走本机 `git` 命令；也可在设置页或配置文件中切到 `go-git` 纯 Go 实现，完全免安装 Git
+- **界面管理配置** — 设置页支持直接编辑本地仓库路径 / 远程地址 / Git 客户端，保存后写回 `pwdmgr.config.json` 并热切换后端，保留未知字段不丢
 - **多空间隔离** — 支持创建多个逻辑空间（如"个人 / 工作"），条目按空间隔离展示，可单条或批量在空间之间移动
 - **软删除与合并** — 删除记 `deleted_at` 不立即清除，多设备并发修改时按 `updated_at` 合并条目/空间，无需手动处理冲突
 - **跨平台桌面应用** — 基于 [Wails](https://wails.io) 构建，支持 Windows / macOS / Linux
@@ -90,16 +91,25 @@ wails build -platform windows/amd64
 
 > **go-git 模式注意**：目前 go-git 后端的 `Pull` 仅支持 fast-forward / 合并（不支持 `--rebase`）。在我们同步时"工作区已清空再 pull"的前提下足够使用；若你习惯频繁手动改动本地仓库文件，推荐继续保持默认的 `exec` 后端。
 
+> **在界面修改配置**：打开应用 → **设置** 页 → **编辑配置**，可直接改写上述三项，点击 **保存** 即可：
+>
+> - 前端调用 `UpdateAppConfig` 把值写回当前生效的 `pwdmgr.config.json`（原子替换，保留其他未知字段）
+> - 后端立即重新加载配置并按 `git_client` 热切换 Git 后端，无需重启应用
+> - 保存前会自动锁定保险库，避免正在修改路径/后端期间误操作
+> - 校验失败（例如 `repo_root` 为空或不是绝对路径）会停留在编辑态并提示具体原因
+
 #### 配置文件位置
 
 应用按以下优先级自动搜索配置文件，找到第一个即使用：
 
 | 优先级 | 位置 | 说明 |
 |:------:|------|------|
-| 1 | 环境变量 `PWDMGR_CONFIG` 指定的路径 | 适用于开发调试 |
-| 2 | **用户配置目录** | 推荐的生产环境放置位置（见下表） |
-| 3 | 可执行文件同级目录 | Windows 下将配置与 exe 放一起即可 |
-| 4 | 当前工作目录 | `wails dev` 开发时自动使用项目根目录 |
+| 1 | 环境变量 `PWDMGR_CONFIG` 指定的路径 | 适用于开发调试 / 多环境切换 |
+| 2 | 可执行文件同级目录 | 便携式部署：将配置与 exe / 二进制放在一起 |
+| 3 | 当前工作目录 | `wails dev` 开发时自动命中项目根目录 |
+| 4 | **用户配置目录** | 推荐的标准安装位置（见下表） |
+
+> **首次新建的默认位置**：当以上候选全都不存在时，应用会把 **用户配置目录** 作为首次 `Save()` 的落点（通过设置页保存配置），以保证所有平台都能稳定写入 —— 比如 macOS 的 `.app` 内部和 `/` 通常不可写，而用户配置目录永远可写。
 
 各平台的用户配置目录：
 
@@ -109,7 +119,7 @@ wails build -platform windows/amd64
 | Windows | `%AppData%\kPass\pwdmgr.config.json` |
 | Linux | `~/.config/kPass/pwdmgr.config.json` |
 
-> **macOS 用户注意**：从 Finder / Launchpad 启动的 `.app` 应用，工作目录为 `/` 且不继承 shell 环境变量。请将配置文件放到上述用户配置目录，无需设置环境变量。
+> **macOS 用户注意**：从 Finder / Launchpad 启动的 `.app` 应用，工作目录为 `/` 且不继承 shell 环境变量。请将配置文件放到上述用户配置目录，或使用应用内 **设置 → 编辑配置** 保存一次即可自动落到该目录。
 
 #### 开发时指定配置
 
@@ -123,7 +133,7 @@ PWDMGR_CONFIG=/path/to/my-config.json wails dev
 
 ### 首次使用（第一台设备）
 
-1. 填写 `pwdmgr.config.json` 中的 `repo_root` 和 `remote_url`
+1. 填写 `pwdmgr.config.json` 中的 `repo_root` 和 `remote_url`（或打开应用后进入 **设置** 页直接编辑并保存）
 2. 打开应用 → **同步** 页 → 点击 **创建本地库**，设置主密码
 3. 切换到 **保险库** 页 → 解锁 → 添加密码条目
 4. 回到 **同步** 页 → 点击 **绑定远程并同步**，将密码库推送到远程仓库
@@ -152,8 +162,8 @@ pwdmgr/
 ├── wails.json                 # Wails 项目配置
 │
 ├── internal/
-│   ├── app/app.go             # Wails 绑定层，暴露方法给前端
-│   ├── config/config.go       # 配置文件加载与解析（含 git_client 规范化）
+│   ├── app/app.go             # Wails 绑定层，暴露方法给前端（含 UpdateAppConfig）
+│   ├── config/config.go       # 配置加载/解析 + Save（原子写回，保留未知字段）
 │   ├── crypto/crypto.go       # Argon2id + AES-GCM 加解密
 │   ├── git/
 │   │   ├── backend.go         # Backend 接口 + SetBackend / Normalize 分发
@@ -189,7 +199,7 @@ pwdmgr/
 │   │       ├── EntryFormPanel.vue # 新增 / 编辑条目表单
 │   │       ├── SpacePickerDialog.vue # 选择目标空间的通用弹窗
 │   │       ├── SyncTab.vue        # 同步页（仓库初始化/状态/操作）
-│   │       ├── SettingsTab.vue    # 设置页
+│   │       ├── SettingsTab.vue    # 设置页（只读/编辑双模式，写回 pwdmgr.config.json）
 │   │       ├── PasswordDialog.vue # 密码输入弹窗
 │   │       ├── ConfirmDialog.vue  # 确认弹窗
 │   │       └── ToastNotification.vue # 通知提示

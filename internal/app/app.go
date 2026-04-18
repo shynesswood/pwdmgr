@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"pwdmgr/internal/config"
@@ -79,6 +81,58 @@ func (a *App) ReloadConfig() error {
 	a.cfgErr = err
 	a.applyGitBackend()
 	return err
+}
+
+// UpdateAppConfig 在 UI 中编辑仓库路径 / 远程 URL / git_client 后，把最新值
+// 写回磁盘 pwdmgr.config.json，并同步内存 cfg 与 git 后端。
+//
+// 校验规则：
+//   - repo_root：必填、必须是绝对路径；若已存在则必须是目录（不能是普通文件）
+//   - remote_url：允许为空（仅本地使用），非空时 TrimSpace
+//   - gitClient：Normalize 到 exec / go-git，未知值回退默认
+//
+// 返回保存后的最新 Snapshot 供前端刷新。
+func (a *App) UpdateAppConfig(repoRoot, remoteURL, gitClient string) (config.Snapshot, error) {
+	repoRoot = strings.TrimSpace(repoRoot)
+	remoteURL = strings.TrimSpace(remoteURL)
+	gitClient = config.NormalizeGitClient(gitClient)
+
+	if repoRoot == "" {
+		return a.GetAppConfig(), fmt.Errorf("仓库路径不能为空")
+	}
+	if !filepath.IsAbs(repoRoot) {
+		return a.GetAppConfig(), fmt.Errorf("仓库路径必须是绝对路径（当前：%s）", repoRoot)
+	}
+	if info, err := os.Stat(repoRoot); err == nil && !info.IsDir() {
+		return a.GetAppConfig(), fmt.Errorf("仓库路径指向的是文件而不是目录：%s", repoRoot)
+	}
+
+	// 以已加载的 cfg 为基础保留 resolvedPath 等内部状态；首次运行时 cfg 可能为 nil。
+	cfg := a.cfg
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	cfg.RepoRoot = repoRoot
+	cfg.RemoteURL = remoteURL
+	cfg.GitClient = gitClient
+
+	if err := cfg.Save(); err != nil {
+		return a.GetAppConfig(), err
+	}
+
+	// 写完重新 Load，拿到规范化的 resolvedPath 并确保文件内容自洽。
+	loaded, err := config.Load()
+	if err != nil {
+		// 兜底：保存成功但重新读取失败（极少见），保持内存 cfg 不丢。
+		a.cfg = cfg
+		a.cfgErr = err
+		a.applyGitBackend()
+		return a.GetAppConfig(), err
+	}
+	a.cfg = loaded
+	a.cfgErr = nil
+	a.applyGitBackend()
+	return a.cfg.Snapshot(), nil
 }
 
 func (a *App) GetRepoStatus() (service.RepoStatus, error) {

@@ -105,13 +105,16 @@ func executableDir() string {
 	return dir
 }
 
-// CandidatePaths 返回按优先级排列的候选配置文件路径列表。
+// CandidatePaths 返回按搜索优先级排列的候选配置文件路径列表。
+//
+// 顺序（从高到低）：
+//  1. 可执行文件同级目录 — 便携式部署 / Windows 放一起即可
+//  2. 当前工作目录        — 开发模式 `wails dev` 自动命中项目根
+//  3. 用户配置目录        — 标准安装位置（macOS/Windows/Linux）
+//
+// 环境变量 `PWDMGR_CONFIG` 优先级高于以上所有项，由 ResolveConfigPath 单独处理。
 func CandidatePaths() []string {
 	var paths []string
-
-	if d := userConfigDir(); d != "" {
-		paths = append(paths, filepath.Join(d, DefaultConfigFileName))
-	}
 
 	if d := executableDir(); d != "" {
 		paths = append(paths, filepath.Join(d, DefaultConfigFileName))
@@ -121,11 +124,19 @@ func CandidatePaths() []string {
 		paths = append(paths, filepath.Join(wd, DefaultConfigFileName))
 	}
 
+	if d := userConfigDir(); d != "" {
+		paths = append(paths, filepath.Join(d, DefaultConfigFileName))
+	}
+
 	return paths
 }
 
 // ResolveConfigPath 按优先级搜索配置文件并返回其绝对路径。
-// 搜索顺序：环境变量 > 用户配置目录 > 可执行文件同级目录 > 当前工作目录。
+// 搜索顺序：环境变量 > 可执行文件同级目录 > 当前工作目录 > 用户配置目录。
+//
+// 当所有候选均不存在时，返回 **用户配置目录** 下的默认路径作为新建位置 ——
+// 搜索优先级偏向就近查找已有文件，但新建时仍倾向标准可写位置（避免把
+// macOS `.app` 内部或 `/` 当成首次创建目录），这能保证首次 `Save()` 不失败。
 func ResolveConfigPath() string {
 	if p := strings.TrimSpace(os.Getenv(EnvConfigPath)); p != "" {
 		if filepath.IsAbs(p) {
@@ -144,7 +155,6 @@ func ResolveConfigPath() string {
 		}
 	}
 
-	// 都不存在时，返回用户配置目录路径作为默认位置（方便报错提示用户在此创建）
 	if d := userConfigDir(); d != "" {
 		return filepath.Join(d, DefaultConfigFileName)
 	}
@@ -196,4 +206,72 @@ func (c *Config) Snapshot() Snapshot {
 		VaultFileName: VaultFileName,
 		SearchPaths:   CandidatePaths(),
 	}
+}
+
+// Path 返回本次 Load 时解析到的配置文件路径；未 Load 过时为空串。
+func (c *Config) Path() string {
+	if c == nil {
+		return ""
+	}
+	return c.resolvedPath
+}
+
+// ResolvedOrCandidatePath 返回将要用于 Save 的目标路径：
+// 优先使用 Load 时解析的路径，否则走候选优先级（用户配置目录）。
+func (c *Config) ResolvedOrCandidatePath() string {
+	if c != nil && c.resolvedPath != "" {
+		return c.resolvedPath
+	}
+	return ResolveConfigPath()
+}
+
+// Save 把 `repo_root / remote_url / git_client` 三个字段写回磁盘。
+//
+// 为了不丢失未来新增的字段，或用户在 json 中保留的自定义字段，Save 会：
+//  1. 先把现有文件读成通用 map
+//  2. 覆盖这三个字段
+//  3. 以 2 空格缩进的 JSON 原子写回（先写 .tmp 再 rename）
+//
+// 目标路径：若曾通过 Load 成功解析过则沿用该路径；否则按 CandidatePaths 优先级，
+// 通常落到用户配置目录（macOS: ~/Library/Application Support/kPass/...）。
+func (c *Config) Save() error {
+	if c == nil {
+		return fmt.Errorf("config 未初始化")
+	}
+	path := c.ResolvedOrCandidatePath()
+	if path == "" {
+		return fmt.Errorf("无法确定配置文件写入路径")
+	}
+
+	dir := filepath.Dir(path)
+	if dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("创建配置目录失败: %w", err)
+		}
+	}
+
+	payload := map[string]any{}
+	if data, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(data, &payload) // 尽力保留已有字段；解析失败则退化为空 map
+	}
+	payload["repo_root"] = strings.TrimSpace(c.RepoRoot)
+	payload["remote_url"] = strings.TrimSpace(c.RemoteURL)
+	payload["git_client"] = NormalizeGitClient(c.GitClient)
+
+	out, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("序列化配置失败: %w", err)
+	}
+	out = append(out, '\n')
+
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, out, 0o600); err != nil {
+		return fmt.Errorf("写入临时文件失败: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("替换配置文件失败: %w", err)
+	}
+	c.resolvedPath = path
+	return nil
 }

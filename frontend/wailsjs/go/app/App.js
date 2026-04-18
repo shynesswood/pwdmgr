@@ -66,6 +66,10 @@ export function Sync(arg1) {
   return window['go']['app']['App']['Sync'](arg1);
 }
 
+export function UpdateAppConfig(arg1, arg2, arg3) {
+  return window['go']['app']['App']['UpdateAppConfig'](arg1, arg2, arg3);
+}
+
 export function UpdateVaultEntry(arg1, arg2) {
   return window['go']['app']['App']['UpdateVaultEntry'](arg1, arg2);
 }
