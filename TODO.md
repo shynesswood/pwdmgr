@@ -8,6 +8,10 @@
 
 > `internal/config.Config` 新增原子 `Save()`（JSON map 合并 + `tmp + rename`，保留未知字段）；`internal/app.UpdateAppConfig` 对 `repo_root / remote_url / git_client` 做校验后写盘、重新 Load 并同步切换 git 后端。`SettingsTab.vue` 重写为只读/编辑两种模式，`git_client` 下拉选择，保存时自动锁定 vault 避免配置期间误操作。自动化新增 CFG-SV1~CFG-SV4、APP-UC1~APP-UC5 共 9 个用例，手工新增 CFG-E1/CFG-E2。未做远程连通性自动探测（避免阻塞 UI），保留为后续增强。
 
+## ~~go-git 显式 SSH 凭据（解决 macOS 握手 EOF）~~（已完成）
+
+> 配置新增 `ssh_key_path` / `ssh_key_passphrase`（后者 Snapshot 只暴露布尔位 `ssh_key_has_pass`），`internal/git.SetSSHCredentials` 与 `buildAuth` 形成「显式 key → ssh-agent → 默认文件」优先级；显式 key 加载失败时直接返回含路径 / 含"被口令加密"提示的错误，不再静默回落 nil 认证。`app.UpdateSSHCredentials` 绑定同步注入；wailsjs 手工补 `UpdateSSHCredentials`。`SettingsTab.vue` 在编辑态扩展"SSH 凭据"独立表单块：只读区块展示路径与"已设置/未设置"状态；编辑区块有 `ssh_key_path` 输入 + `ssh_key_passphrase` 密码框（带显示/隐藏切换）+ "保存 / 清空已保存"两个按钮。后端"完整覆盖"语义明示在 hint 中，路径填而口令留空且后端原有口令时弹确认框防误清。自动化新增 CFG-SSH1~CFG-SSH3、GGA4~GGA5 共 5 个用例；README 的"go-git 模式"段补全 macOS 三种可选方案。
+
 ## 多仓库支持（2.x）
 
 **优先级**：最低（计划 2.x 系列版本）  

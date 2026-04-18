@@ -4,6 +4,7 @@ import {
   GetAppConfig,
   ReloadConfig,
   UpdateAppConfig,
+  UpdateSSHCredentials,
   GetRepoStatus,
   Pull,
   Push,
@@ -185,6 +186,25 @@ const doSaveAppConfig = async ({ repo_root, remote_url, git_client }) => {
   }
 }
 
+// 保存/清空 go-git 模式下的 SSH 凭据：ssh_key_path / ssh_key_passphrase。
+// 完整覆盖语义：传入值原样写盘；两者都传空串表示清除已有凭据回落到自动探测。
+// 成功后后端会立刻把新凭据注入到 git 包，下次 Sync/Pull 直接生效，无需重启。
+const doSaveSSHCredentials = async ({ ssh_key_path, ssh_key_passphrase }) => {
+  try {
+    const snapshot = await UpdateSSHCredentials(ssh_key_path || '', ssh_key_passphrase || '')
+    appConfig.value = snapshot
+    showSuccess(
+      (ssh_key_path || '').trim() === '' && (ssh_key_passphrase || '') === ''
+        ? 'SSH 凭据已清空（回落自动探测）'
+        : 'SSH 凭据已保存'
+    )
+  } catch (e) {
+    await refreshAppConfig()
+    showErr(e)
+    throw e
+  }
+}
+
 /* ---------- Sync operations ---------- */
 const doPull = async () => {
   syncing.value = true
@@ -324,6 +344,7 @@ onMounted(async () => {
         v-show="activeTab === 'settings'"
         :app-config="appConfig"
         :on-save="doSaveAppConfig"
+        :on-save-ssh="doSaveSSHCredentials"
         @reload="doReloadConfig"
       />
     </main>

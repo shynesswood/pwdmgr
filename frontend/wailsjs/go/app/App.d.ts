@@ -38,4 +38,6 @@ export function Sync(arg1:string):Promise<void>;
 
 export function UpdateAppConfig(arg1:string,arg2:string,arg3:string):Promise<config.Snapshot>;
 
+export function UpdateSSHCredentials(arg1:string,arg2:string):Promise<config.Snapshot>;
+
 export function UpdateVaultEntry(arg1:string,arg2:vault.Entry):Promise<void>;

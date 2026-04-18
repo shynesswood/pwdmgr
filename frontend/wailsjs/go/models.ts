@@ -5,6 +5,8 @@ export namespace config {
 	    repo_root: string;
 	    remote_url: string;
 	    git_client: string;
+	    ssh_key_path?: string;
+	    ssh_key_has_pass: boolean;
 	    vault_file_name: string;
 	    load_error?: string;
 	    search_paths?: string[];
@@ -19,6 +21,8 @@ export namespace config {
 	        this.repo_root = source["repo_root"];
 	        this.remote_url = source["remote_url"];
 	        this.git_client = source["git_client"];
+	        this.ssh_key_path = source["ssh_key_path"];
+	        this.ssh_key_has_pass = source["ssh_key_has_pass"];
 	        this.vault_file_name = source["vault_file_name"];
 	        this.load_error = source["load_error"];
 	        this.search_paths = source["search_paths"];

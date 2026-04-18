@@ -21,11 +21,21 @@ type goGitBackend struct{}
 func (goGitBackend) Name() string { return BackendGoGit }
 
 func (goGitBackend) Clone(repoURL, path string) error {
-	auth, _ := buildAuth(repoURL)
-	_, err := gogit.PlainClone(path, false, &gogit.CloneOptions{
-		URL:  repoURL,
-		Auth: auth,
+	auth, err := buildAuth(repoURL)
+	if err != nil {
+		return err
+	}
+	dbg("Clone: url=%s path=%s authType=%T", repoURL, path, auth)
+	err = withDirectNetwork(func() error {
+		_, err := gogit.PlainClone(path, false, &gogit.CloneOptions{
+			URL:  repoURL,
+			Auth: auth,
+		})
+		return err
 	})
+	if err != nil {
+		dbg("Clone: err=%v", err)
+	}
 	return err
 }
 
@@ -46,9 +56,18 @@ func (goGitBackend) Pull(path string) error {
 		return err
 	}
 
-	auth, _ := buildAuth(goGitRemoteURL(r))
+	remoteURL := goGitRemoteURL(r)
+	auth, err := buildAuth(remoteURL)
+	if err != nil {
+		return err
+	}
+	dbg("Pull: path=%s remoteURL=%s authType=%T", path, remoteURL, auth)
 
-	if err := r.Fetch(&gogit.FetchOptions{RemoteName: "origin", Auth: auth}); err != nil {
+	fetchErr := withDirectNetwork(func() error {
+		return r.Fetch(&gogit.FetchOptions{RemoteName: "origin", Auth: auth})
+	})
+	if err := fetchErr; err != nil {
+		dbg("Pull.Fetch: err=%v", err)
 		switch {
 		case errors.Is(err, gogit.NoErrAlreadyUpToDate):
 			// 已经是最新，继续走后面的本地 checkout / merge 逻辑
@@ -87,13 +106,16 @@ func (goGitBackend) Pull(path string) error {
 		return w.Checkout(&gogit.CheckoutOptions{Branch: localRefName, Force: true})
 	}
 
-	err = w.Pull(&gogit.PullOptions{RemoteName: "origin", Auth: auth})
+	err = withDirectNetwork(func() error {
+		return w.Pull(&gogit.PullOptions{RemoteName: "origin", Auth: auth})
+	})
 	switch {
 	case err == nil,
 		errors.Is(err, gogit.NoErrAlreadyUpToDate),
 		errors.Is(err, transport.ErrEmptyRemoteRepository):
 		return nil
 	}
+	dbg("Pull.Worktree: err=%v", err)
 	return err
 }
 
@@ -129,11 +151,19 @@ func (goGitBackend) Push(path string) error {
 		sig := goGitSignature(r)
 		_, _ = w.Commit("sync vault", &gogit.CommitOptions{Author: sig, Committer: sig})
 	}
-	auth, _ := buildAuth(goGitRemoteURL(r))
-	err = r.Push(&gogit.PushOptions{RemoteName: "origin", Auth: auth})
+	remoteURL := goGitRemoteURL(r)
+	auth, err := buildAuth(remoteURL)
+	if err != nil {
+		return err
+	}
+	dbg("Push: path=%s remoteURL=%s authType=%T", path, remoteURL, auth)
+	err = withDirectNetwork(func() error {
+		return r.Push(&gogit.PushOptions{RemoteName: "origin", Auth: auth})
+	})
 	if err == nil || errors.Is(err, gogit.NoErrAlreadyUpToDate) {
 		return nil
 	}
+	dbg("Push: err=%v", err)
 	return err
 }
 
@@ -192,10 +222,20 @@ func (goGitBackend) RemoteHasCommit(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	auth, _ := buildAuth(goGitRemoteURL(r))
-	refs, err := remote.List(&gogit.ListOptions{Auth: auth})
+	remoteURL := goGitRemoteURL(r)
+	auth, err := buildAuth(remoteURL)
 	if err != nil {
-		// 远程存在但里头空（无任何引用）→ 等同于 "没有提交"
+		return false, err
+	}
+	dbg("RemoteHasCommit: path=%s remoteURL=%s authType=%T", path, remoteURL, auth)
+	var refs []*plumbing.Reference
+	err = withDirectNetwork(func() error {
+		var listErr error
+		refs, listErr = remote.List(&gogit.ListOptions{Auth: auth})
+		return listErr
+	})
+	if err != nil {
+		dbg("RemoteHasCommit.List: err=%v", err)
 		if errors.Is(err, transport.ErrEmptyRemoteRepository) {
 			return false, nil
 		}

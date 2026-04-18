@@ -33,13 +33,16 @@ func (a *App) Startup(ctx context.Context) {
 	a.applyGitBackend()
 }
 
-// applyGitBackend 根据当前配置切换 git 包的底层后端；配置未加载时回退默认。
+// applyGitBackend 根据当前配置切换 git 包的底层后端与 SSH 凭据；
+// 配置未加载时回退默认后端、并清空自定义 SSH 凭据。
 func (a *App) applyGitBackend() {
 	if a.cfg != nil {
 		git.SetBackend(a.cfg.GitClient)
+		git.SetSSHCredentials(a.cfg.SSHKeyPath, a.cfg.SSHKeyPassphrase)
 		return
 	}
 	git.SetBackend(config.DefaultGitClient)
+	git.SetSSHCredentials("", "")
 }
 
 func (a *App) activeConfig() (*config.Config, error) {
@@ -124,6 +127,46 @@ func (a *App) UpdateAppConfig(repoRoot, remoteURL, gitClient string) (config.Sna
 	loaded, err := config.Load()
 	if err != nil {
 		// 兜底：保存成功但重新读取失败（极少见），保持内存 cfg 不丢。
+		a.cfg = cfg
+		a.cfgErr = err
+		a.applyGitBackend()
+		return a.GetAppConfig(), err
+	}
+	a.cfg = loaded
+	a.cfgErr = nil
+	a.applyGitBackend()
+	return a.cfg.Snapshot(), nil
+}
+
+// UpdateSSHCredentials 仅更新与 go-git 远程操作相关的两项 SSH 凭据。
+//
+// 典型使用场景：macOS 从 Finder 启动的 .app 拿不到 ssh-agent，且 ~/.ssh 下默认
+// 私钥通常被口令加密托管到 Keychain —— 导致 go-git 握手直接 EOF。此时用户需要：
+//   1. 提供一把未加密的私钥绝对路径（sshKeyPath，passphrase 传空），或
+//   2. 提供被加密的私钥路径 + 对应口令 (sshKeyPassphrase)
+//
+// 传 ("", "") 表示清空，让 buildAuth 回落到自动探测（ssh-agent / ~/.ssh/id_*）。
+// 返回更新后的 Snapshot（不含口令明文）。
+func (a *App) UpdateSSHCredentials(sshKeyPath, sshKeyPassphrase string) (config.Snapshot, error) {
+	sshKeyPath = strings.TrimSpace(sshKeyPath)
+
+	// 允许 repo_root 还没配置时单独改 SSH（配合后续的 UpdateAppConfig 使用），
+	// 所以构造基础 cfg 时不强制校验 repo_root。
+	cfg := a.cfg
+	if cfg == nil {
+		// 没有 cfg 意味着还没成功 Load；此时直接改 SSH 没有 repo_root 无法 Save。
+		// 提示用户先完成 repo_root 的初始化。
+		return a.GetAppConfig(), fmt.Errorf("请先完成仓库路径的初始化后再配置 SSH 凭据")
+	}
+	cfg.SSHKeyPath = sshKeyPath
+	cfg.SSHKeyPassphrase = sshKeyPassphrase
+
+	if err := cfg.Save(); err != nil {
+		return a.GetAppConfig(), err
+	}
+
+	loaded, err := config.Load()
+	if err != nil {
 		a.cfg = cfg
 		a.cfgErr = err
 		a.applyGitBackend()

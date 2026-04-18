@@ -222,3 +222,88 @@ func TestCFGSV4_SaveNormalizesGitClient(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &back))
 	assert.Equal(t, "go-git", back["git_client"])
 }
+
+// ---------------------------------------------------------------------------
+// CFG-SSH1 — Save/Load 保留 ssh_key_path 与 ssh_key_passphrase
+// ---------------------------------------------------------------------------
+
+func TestCFGSSH1_SaveAndLoadSSHFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, DefaultConfigFileName)
+	t.Setenv(EnvConfigPath, path)
+
+	cfg := &Config{
+		RepoRoot:         "/x",
+		SSHKeyPath:       "/Users/me/.ssh/id_pwdmgr",
+		SSHKeyPassphrase: "s3cret pass",
+	}
+	require.NoError(t, cfg.Save())
+
+	// 磁盘文件直接包含这两个字段
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var back map[string]any
+	require.NoError(t, json.Unmarshal(data, &back))
+	assert.Equal(t, "/Users/me/.ssh/id_pwdmgr", back["ssh_key_path"])
+	assert.Equal(t, "s3cret pass", back["ssh_key_passphrase"])
+
+	// Load 回来后字段完整
+	loaded, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, "/Users/me/.ssh/id_pwdmgr", loaded.SSHKeyPath)
+	assert.Equal(t, "s3cret pass", loaded.SSHKeyPassphrase)
+}
+
+// ---------------------------------------------------------------------------
+// CFG-SSH2 — 把 SSH 字段清空再 Save，应从 JSON 中移除，避免残留空串
+// ---------------------------------------------------------------------------
+
+func TestCFGSSH2_EmptySSHFieldsAreRemoved(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, DefaultConfigFileName)
+	t.Setenv(EnvConfigPath, path)
+
+	// 先落盘有值
+	require.NoError(t, os.WriteFile(path, []byte(`{
+  "repo_root": "/x",
+  "ssh_key_path": "/k",
+  "ssh_key_passphrase": "p"
+}`), 0o600))
+
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	// 清空再保存
+	cfg.SSHKeyPath = ""
+	cfg.SSHKeyPassphrase = ""
+	require.NoError(t, cfg.Save())
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var back map[string]any
+	require.NoError(t, json.Unmarshal(data, &back))
+	_, hasPath := back["ssh_key_path"]
+	_, hasPass := back["ssh_key_passphrase"]
+	assert.False(t, hasPath, "清空后的 ssh_key_path 应从 JSON 里移除")
+	assert.False(t, hasPass, "清空后的 ssh_key_passphrase 应从 JSON 里移除")
+}
+
+// ---------------------------------------------------------------------------
+// CFG-SSH3 — Snapshot 仅暴露 has_pass 布尔位，不应含口令明文
+// ---------------------------------------------------------------------------
+
+func TestCFGSSH3_SnapshotHidesPassphrase(t *testing.T) {
+	cfg := &Config{
+		RepoRoot:         "/x",
+		SSHKeyPath:       "/k",
+		SSHKeyPassphrase: "should-not-leak",
+	}
+	snap := cfg.Snapshot()
+	assert.Equal(t, "/k", snap.SSHKeyPath)
+	assert.True(t, snap.SSHKeyHasPass)
+
+	// JSON 序列化后也不应泄漏
+	raw, err := json.Marshal(snap)
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "should-not-leak")
+}

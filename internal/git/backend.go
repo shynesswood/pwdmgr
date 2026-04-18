@@ -58,12 +58,14 @@ func Normalize(name string) string {
 func SetBackend(name string) {
 	backendMu.Lock()
 	defer backendMu.Unlock()
-	switch Normalize(name) {
+	normalized := Normalize(name)
+	switch normalized {
 	case BackendGoGit:
 		activeBackend = &goGitBackend{}
 	default:
 		activeBackend = &execBackend{}
 	}
+	dbg("SetBackend: requested=%q -> active=%s", name, normalized)
 }
 
 // SetBackendStrict 与 SetBackend 类似，但当 name 指向未知后端时返回错误。

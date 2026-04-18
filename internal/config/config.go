@@ -37,15 +37,32 @@ type Config struct {
 	// 配置缺省或取值未知时回退为 "exec"。
 	GitClient string `json:"git_client,omitempty"`
 
+	// SSHKeyPath 在 go-git 后端下指定 SSH 私钥文件绝对路径；
+	// 留空时按默认顺序探测 ssh-agent / ~/.ssh/id_ed25519 / id_ecdsa / id_rsa。
+	// 典型场景：macOS 从 Finder 启动的 GUI 应用拿不到 ssh-agent，且默认
+	// 私钥被口令加密（托管于 Keychain）；显式指定一把未加密 key，或配合
+	// SSHKeyPassphrase 使用加密 key，可绕开 "ssh: handshake failed: EOF"。
+	SSHKeyPath string `json:"ssh_key_path,omitempty"`
+
+	// SSHKeyPassphrase 私钥口令，仅在 SSHKeyPath 对应 key 被加密时需要。
+	// 明文存储在 pwdmgr.config.json 中（文件权限 0600），安全模型假设本机
+	// 文件系统可信；有更高要求的用户建议改用 git_client: "exec" 由系统 git
+	// + Keychain / ssh-agent 管理凭据。
+	SSHKeyPassphrase string `json:"ssh_key_passphrase,omitempty"`
+
 	resolvedPath string `json:"-"`
 }
 
 // Snapshot 供界面展示（不含敏感逻辑，仅路径与元信息）。
+// 注意：出于安全考虑，SSHKeyPassphrase **不会** 暴露到 Snapshot；
+// SSHKeyPath 可以展示，方便界面显示当前使用的 key。
 type Snapshot struct {
 	ConfigPath    string   `json:"config_path"`
 	RepoRoot      string   `json:"repo_root"`
 	RemoteURL     string   `json:"remote_url"`
 	GitClient     string   `json:"git_client"`
+	SSHKeyPath    string   `json:"ssh_key_path,omitempty"`
+	SSHKeyHasPass bool     `json:"ssh_key_has_pass"`
 	VaultFileName string   `json:"vault_file_name"`
 	LoadError     string   `json:"load_error,omitempty"`
 	SearchPaths   []string `json:"search_paths,omitempty"`
@@ -181,6 +198,8 @@ func Load() (*Config, error) {
 	c.RepoRoot = strings.TrimSpace(c.RepoRoot)
 	c.RemoteURL = strings.TrimSpace(c.RemoteURL)
 	c.GitClient = NormalizeGitClient(c.GitClient)
+	c.SSHKeyPath = strings.TrimSpace(c.SSHKeyPath)
+	// SSHKeyPassphrase 不 Trim：口令本身可能含空格，让原样透传
 	if c.RepoRoot == "" {
 		return nil, fmt.Errorf("repo_root 不能为空")
 	}
@@ -203,6 +222,8 @@ func (c *Config) Snapshot() Snapshot {
 		RepoRoot:      c.RepoRoot,
 		RemoteURL:     c.RemoteURL,
 		GitClient:     NormalizeGitClient(c.GitClient),
+		SSHKeyPath:    c.SSHKeyPath,
+		SSHKeyHasPass: c.SSHKeyPassphrase != "",
 		VaultFileName: VaultFileName,
 		SearchPaths:   CandidatePaths(),
 	}
@@ -257,6 +278,18 @@ func (c *Config) Save() error {
 	payload["repo_root"] = strings.TrimSpace(c.RepoRoot)
 	payload["remote_url"] = strings.TrimSpace(c.RemoteURL)
 	payload["git_client"] = NormalizeGitClient(c.GitClient)
+	// SSH 字段：非空才写盘，空值则从 payload 里移除，避免把用户手动添加的敏感字段
+	// 在一次 UI 清空保存后永久遗留为 "ssh_key_path": ""。
+	if v := strings.TrimSpace(c.SSHKeyPath); v != "" {
+		payload["ssh_key_path"] = v
+	} else {
+		delete(payload, "ssh_key_path")
+	}
+	if c.SSHKeyPassphrase != "" {
+		payload["ssh_key_passphrase"] = c.SSHKeyPassphrase
+	} else {
+		delete(payload, "ssh_key_passphrase")
+	}
 
 	out, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {

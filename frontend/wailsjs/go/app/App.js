@@ -70,6 +70,10 @@ export function UpdateAppConfig(arg1, arg2, arg3) {
   return window['go']['app']['App']['UpdateAppConfig'](arg1, arg2, arg3);
 }
 
+export function UpdateSSHCredentials(arg1, arg2) {
+  return window['go']['app']['App']['UpdateSSHCredentials'](arg1, arg2);
+}
+
 export function UpdateVaultEntry(arg1, arg2) {
   return window['go']['app']['App']['UpdateVaultEntry'](arg1, arg2);
 }

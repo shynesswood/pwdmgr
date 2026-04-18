@@ -79,7 +79,9 @@ wails build -platform windows/amd64
 {
   "repo_root": "/绝对路径/到你的密码库-git仓库根目录",
   "remote_url": "git@github.com:你的用户/远程仓库.git",
-  "git_client": "exec"
+  "git_client": "exec",
+  "ssh_key_path": "",
+  "ssh_key_passphrase": ""
 }
 ```
 
@@ -88,12 +90,26 @@ wails build -platform windows/amd64
 | `repo_root` | 是 | — | 本地 Git 仓库的绝对路径，密码库文件 `vault.dat` 存放于此 |
 | `remote_url` | 否 | 空 | Git 远程仓库地址，留空则仅本地使用，不同步 |
 | `git_client` | 否 | `exec` | Git 底层实现：`exec` 调用本机 `git` 命令；`go-git` 使用纯 Go 实现（不依赖本机 Git）。留空或取值未知时回退为 `exec` |
+| `ssh_key_path` | 否 | 空 | **仅 `go-git` 模式生效**。指定 SSH 私钥的绝对路径；留空时自动按 `ssh-agent → ~/.ssh/id_ed25519 → id_ecdsa → id_rsa` 顺序探测 |
+| `ssh_key_passphrase` | 否 | 空 | **仅 `go-git` 模式生效**。当 `ssh_key_path` 指向的私钥被口令加密时填写；留空表示私钥未加密 |
 
 > **go-git 模式注意**：
 >
 > - `Pull` 仅支持 fast-forward / 合并（不支持 `--rebase`）。在我们同步时"工作区已清空再 pull"的前提下足够使用；若你习惯频繁手动改动本地仓库文件，推荐继续保持默认的 `exec` 后端。
-> - **SSH 认证链**与系统 `git` 不同：go-git 不读 `~/.ssh/config`、不自动调用 ssh-agent（macOS 从 Finder/Launchpad 启动的 GUI 应用尤其明显）。应用内部已按 `ssh-agent → ~/.ssh/id_ed25519 → id_ecdsa → id_rsa` 的顺序加载；**只支持未加密的私钥**，若你的 key 有口令，请改用 HTTPS + Token、`git_client: "exec"`，或先 `ssh-add` 到 agent 并把应用从终端启动。
+> - **SSH 认证链**与系统 `git` 不同：go-git 不读 `~/.ssh/config`、不自动调用 ssh-agent。认证优先级为 `ssh_key_path(+passphrase)` → `ssh-agent` → `~/.ssh/id_ed25519 / id_ecdsa / id_rsa`（最后一档仅支持**未加密**私钥）。
 > - `HostKeyCallback` 优先读 `~/.ssh/known_hosts`；读不到时回退"忽略主机指纹"（与系统 `git` 的 `StrictHostKeyChecking=ask` 体验一致），避免首次跑 go-git 就报 EOF。
+>
+> **macOS 用户常见坑** — "`ssh: handshake failed: EOF`"：
+>
+> - Finder / Launchpad 启动的 `.app` 拿不到 `SSH_AUTH_SOCK`，走不了 `ssh-agent`
+> - `~/.ssh/id_rsa` 常被加 passphrase 托管到 Keychain，未加密分支自动跳过 → 最终用 nil 认证方式去连 GitHub，服务端直接关连接
+> - 解决方案任选其一：
+>   1. **为应用单独做一把未加密 SSH key**（推荐）：`ssh-keygen -t ed25519 -f ~/.ssh/id_pwdmgr -N ""`，把公钥加到 GitHub，然后在 `pwdmgr.config.json` 里 `"ssh_key_path": "/Users/<你>/.ssh/id_pwdmgr"`
+>   2. **沿用已有的加密 key**：填 `ssh_key_path` 指向加密私钥，同时填 `ssh_key_passphrase`（明文，安全模型依赖文件系统可信，pwdmgr.config.json 权限应保持 0600）
+>   3. **直接切回系统 git**：把 `"git_client": "exec"`，由系统 `git` + Keychain / ssh-agent 管理凭据
+> - 若应用仍报 `ssh_key_path 指向的文件不存在或不可读` / `私钥被口令加密，请设置 ssh_key_passphrase`，按错误提示修正 `pwdmgr.config.json` 后在设置页点 **重新加载配置** 或重启即可。
+>
+> **特别注意：代理工具（FlClash / ClashX / V2Ray 等）导致的 EOF**：如果你在 `~/.zshrc` / `~/.bashrc` 里 `export` 了 `ALL_PROXY` / `HTTPS_PROXY` / `HTTP_PROXY`，系统 `git`/`ssh` **不读这些变量**，但 go-git 内部通过 `golang.org/x/net/proxy.FromEnvironment()` 会自动走代理，多数代理对裸 SSH 协议处理不好，直接表现为 `ssh: handshake failed: EOF`。从 v-next 起，pwdmgr 在 go-git 模式执行每次远程操作前会**临时 unset** 这几个变量（操作结束恢复），所以即使 shell 里长期开着代理，`go-git` 也能直连 `github.com:22`。如果你在更早版本碰到此问题，可以在启动前 `unset ALL_PROXY all_proxy HTTPS_PROXY https_proxy HTTP_PROXY http_proxy` 手工绕过，或关闭代理工具的系统代理。
 
 > **在界面修改配置**：打开应用 → **设置** 页 → **编辑配置**，可直接改写上述三项，点击 **保存** 即可：
 >

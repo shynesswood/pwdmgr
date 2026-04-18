@@ -19,7 +19,7 @@
 | `internal/git` | `git_test.go` | G1–G11（exec 后端） |
 | `internal/git` | `backend_test.go` | BK1–BK4（后端切换/规范化） |
 | `internal/git` | `gogit_test.go` | GG1–GG10（go-git 后端） |
-| `internal/config` | `config_test.go` | CFG-GC1 / CFG-GC2（git_client 解析）、CFG-SV1~CFG-SV4（Save 写回） |
+| `internal/config` | `config_test.go` | CFG-GC1 / CFG-GC2（git_client 解析）、CFG-SV1~CFG-SV4（Save 写回）、CFG-SSH1~CFG-SSH3（SSH 凭据字段持久化与脱敏） |
 | `internal/app` | `app_test.go` | APP-UC1~APP-UC5（UpdateAppConfig 校验 + 写盘 + 切后端） |
 | `internal/service` | `init_test.go` | I1–I4 |
 | `internal/service` | `status_test.go` | R1–R4 |
@@ -270,13 +270,23 @@ mkdir $local
 - **自动化**：`TestGGA3_BuildAuthSkipsNonSSH` @ `internal/git/gogit_auth_test.go`
 - **覆盖**：`https / http / file / 本地路径 / 空串` 走 `buildAuth` 都返回 `(nil, nil)`，让 go-git 保持默认行为
 
-### GGA4 — 真实 SSH 连通性（手工）🖱️
+### GGA4 — 显式 ssh_key_path 成功构造 AuthMethod 🤖
+
+- **自动化**：`TestGGA4_ExplicitKeyIsUsed` @ `internal/git/gogit_auth_test.go`
+- **覆盖**：临时生成一把未加密的 ed25519 私钥，`SetSSHCredentials(keyPath, "")` 后 `buildAuth` 对 SSH URL 返回非 nil 的 `ssh-public-keys` AuthMethod（优先级高于 agent / 默认文件）
+
+### GGA5 — 显式 ssh_key_path 文件缺失给出可读错误 🤖
+
+- **自动化**：`TestGGA5_MissingKeyReturnsFriendlyError` @ `internal/git/gogit_auth_test.go`
+- **覆盖**：`SetSSHCredentials("/no/such/key", "")` 后调用 `buildAuth("git@github.com:u/r.git")`，返回 error 包含"不存在或不可读"，不再继续尝试其他凭据（避免把真实错误隐藏成 EOF）
+
+### GGA6 — 真实 SSH 连通性（手工）🖱️
 
 - **手工**：把 `pwdmgr.config.json` 的 `remote_url` 填成 GitHub SSH URL（`git@github.com:user/repo.git`），`git_client: "go-git"`，通过 Finder / Launchpad 启动应用（不是从 shell），触发 Sync
-- **预期**：不再出现 `ssh: handshake failed: EOF`；看命中的凭据优先级
-  1. macOS 桌面 + ssh-agent 未运行：自动加载 `~/.ssh/id_ed25519` / `id_rsa`（无口令）完成认证
-  2. 终端 `wails dev`（继承 `SSH_AUTH_SOCK`）：走 ssh-agent
-  3. 无任何凭据：抛出含路径的可读错误，而不是 EOF
+- **预期**：不再出现 `ssh: handshake failed: EOF`；按下面三种场景分别验证
+  1. **配置 `ssh_key_path` 指向未加密 key**：命中第 1 档，认证成功
+  2. **配置 `ssh_key_path` + `ssh_key_passphrase` 指向加密 key**：命中第 1 档，成功
+  3. **留空两个字段**：走 ssh-agent / 默认文件；若都拿不到或默认文件被加密，返回"未找到可用的 SSH 凭据/被口令加密"错误（而不是 EOF）
 
 ---
 
@@ -303,6 +313,21 @@ mkdir $local
 
 - **自动化**：`TestCFGSV4_SaveNormalizesGitClient` @ `internal/config/config_test.go`
 - **覆盖**：写入 `"GoGit"` 等变体时，磁盘里落地的是规范名 `go-git`
+
+### CFG-SSH1 — Save / Load 保留 ssh_key_path / ssh_key_passphrase 🤖
+
+- **自动化**：`TestCFGSSH1_SaveAndLoadSSHFields` @ `internal/config/config_test.go`
+- **覆盖**：赋值两字段 → `Save` → 磁盘 JSON 直接含这两项 → `Load` 回来值完全一致；口令含空格时 Load 不做 Trim
+
+### CFG-SSH2 — SSH 字段清空后 Save 会从 JSON 里移除 🤖
+
+- **自动化**：`TestCFGSSH2_EmptySSHFieldsAreRemoved` @ `internal/config/config_test.go`
+- **覆盖**：已含 `ssh_key_path` / `ssh_key_passphrase` 的配置文件，被清空后 Save，两字段从 JSON 中消失（而不是残留空串，避免误以为"已配置空 key"）
+
+### CFG-SSH3 — Snapshot 不暴露 passphrase 明文 🤖
+
+- **自动化**：`TestCFGSSH3_SnapshotHidesPassphrase` @ `internal/config/config_test.go`
+- **覆盖**：Snapshot 只含 `ssh_key_path` 与布尔位 `ssh_key_has_pass`，JSON 序列化结果不含口令原文
 
 ### CFG-CP1 — CandidatePaths 搜索优先级（可执行目录 > wd > 用户配置目录）🤖
 
@@ -352,6 +377,23 @@ mkdir $local
 
 - **手工**：在编辑模式把 `repo_root` 清空后保存，或填入相对路径 `./foo`
 - **预期**：Toast 报红提示；页面仍处于编辑态，字段保留用户输入，不会错误退出
+
+### CFG-E3 — 设置页保存 / 清空 SSH 凭据 🖱️
+
+- **手工**：
+  1. 进入"设置"→ 点"编辑配置"→ 在下方"SSH 凭据（仅 go-git 模式生效）"块填入一把真实私钥的绝对路径，若有口令一并填写 → 点"保存 SSH 凭据"
+  2. 基本配置切为 `git_client: "go-git"` 并保存 → 执行 Sync，确认不再 EOF
+  3. 回到编辑态，点"清空已保存" → 切回 SSH URL 的默认探测路径
+- **预期**：
+  1. 保存成功 Toast；只读视图立即显示 `SSH 私钥路径` 与 `SSH 私钥口令: 已设置/未设置`
+  2. 口令输入框在保存后自动清空，显示 / 隐藏切换不影响已写盘值
+  3. 口令以明文写入 `pwdmgr.config.json`（文件权限 0600）但**不**出现在 `GetAppConfig` 返回的 Snapshot 里
+  4. 点"清空已保存"后磁盘两字段被移除，只读视图恢复"（未指定，自动探测…）/未设置"
+
+### CFG-E4 — 误清除口令有二次确认 🖱️
+
+- **手工**：前置条件为后端已保存 `ssh_key_has_pass: true`；进入编辑态，保持 `ssh_key_path` 非空，`ssh_key_passphrase` 留空，点"保存 SSH 凭据"
+- **预期**：弹出确认对话框"当前已保存了私钥口令…继续保存会把口令清除…"，点取消则不下发；点确定后才真正清除口令
 
 ---
 
@@ -1052,4 +1094,5 @@ mkdir $local
 | 配置搜索优先级 | `CandidatePaths()` 搜索顺序调整为「可执行文件同级 → 当前工作目录 → 用户配置目录」（环境变量 `PWDMGR_CONFIG` 仍然最优先），便于便携式部署与 `wails dev` 开发；`ResolveConfigPath` 在所有候选都不存在时仍回退到用户配置目录，保证首次 `Save()` 在 macOS `.app` 场景下可写。README 表格与提示同步更新。自动化新增 CFG-CP1 / CFG-CP2 共 2 个用例 |
 | go-git SSH 认证 | 修复 `git_client: "go-git"` 在 macOS Finder 启动时 `ssh: handshake failed: EOF`。新增 `internal/git/gogit_auth.go`：`isSSHURL` 识别 `ssh://` 与 SCP 短写法，`buildAuth` 按「ssh-agent → `~/.ssh/id_ed25519` → `id_ecdsa` → `id_rsa`（无口令）」依次选取凭据，`HostKeyCallback` 优先读 `~/.ssh/known_hosts`，读不到则回退 `InsecureIgnoreHostKey` 保持与系统 git 首次连接一致的体验；`goGitBackend` 的 `Clone / Pull / Fetch / Push / RemoteHasCommit` 全部传入 `Auth`，URL 从本地 origin 取（用新增 `goGitRemoteURL` helper）。自动化新增 GGA1~GGA3（URL 分类 / 用户名 / 非 SSH 跳过）共 3 个用例，手工新增 GGA4（真实 SSH 连通）1 个 |
 | Pull 容忍空远程 | 修复「go-git 模式下本地有提交、远程是空 bare 仓库时 Sync 报"远程仓库为空"」。`goGitBackend.Pull` 的 Fetch 与 `w.Pull` 都捕获 `transport.ErrEmptyRemoteRepository` 返回 nil；`execBackend.Pull` 在 `fetch origin` 成功后若 `git branch -r` 无任何 remote-tracking ref 同样返回 nil。两端 `Sync` 现在遇到空远程会走"本地内容 → Push"路径，行为对齐。自动化新增 G12 / GG11 共 2 个用例 |
+| go-git 显式 SSH 凭据 | 修复 macOS Finder 启动时"`ssh: handshake failed: EOF`"——ssh-agent 拿不到、`~/.ssh/id_*` 又被 Keychain 口令加密的常见组合。`config.Config` 新增 `ssh_key_path` / `ssh_key_passphrase` 字段（Save 仅在非空时写盘，Snapshot 只暴露布尔位 `ssh_key_has_pass` 防泄漏）；`internal/git` 暴露 `SetSSHCredentials(path, passphrase)`，`buildAuth` 优先级改为「显式 key → ssh-agent → 默认文件」，显式 key 加载失败时直接返回含路径 / 含"被口令加密"提示的错误，不再静默回落到 nil 认证；`goGitBackend.Clone / Pull / Push / RemoteHasCommit` 透传 `buildAuth` 的错误；`app.applyGitBackend` 在切换后端的同时同步注入 SSH 凭据，新增 `UpdateSSHCredentials` 绑定（wailsjs 手工同步）。`SettingsTab.vue` 只读模式展示 `SSH 私钥路径 / SSH 私钥口令` 两行；编辑模式增加独立"SSH 凭据"表单区块（含显示/隐藏口令按钮、保存 / 清空按钮、误清除口令二次确认），`App.vue` 提供 `doSaveSSHCredentials` 对接 `UpdateSSHCredentials`。README 补充 macOS 三种可选解决方案（新 key / 填口令 / 回退 exec）。自动化新增 CFG-SSH1~CFG-SSH3、GGA4~GGA5 共 5 个用例；手工新增 CFG-E3 / CFG-E4 共 2 个；原 GGA4 → GGA6（手工） |
 | 批量移动 | Vault 新增 `MoveEntries(ids, targetSpaceID)`，静默跳过无效 ID、对被移动条目刷新 `UpdatedAt` 保证同步胜出；service 层 `MoveEntries` 校验目标空间合法性后写回 vault.dat；Wails 绑定 `MoveVaultEntries(password, targetSpaceID, ids) -> (moved int)`；前端新增 `SpacePickerDialog` 通过 `provide('askSpace')` 提供选择空间的通用能力，EntryCard 增加"移动"按钮、选择模式下的复选框，VaultTab 新增批量选择工具栏（全选当前 / 移动到… / 完成）。自动化新增 MV1~MV4（vault）+ MV-I1~MV-I5（service）共 9 个用例，手工新增 MV-E1~MV-E6 共 6 个用例 |
