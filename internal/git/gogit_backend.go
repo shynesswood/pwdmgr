@@ -21,8 +21,10 @@ type goGitBackend struct{}
 func (goGitBackend) Name() string { return BackendGoGit }
 
 func (goGitBackend) Clone(repoURL, path string) error {
+	auth, _ := buildAuth(repoURL)
 	_, err := gogit.PlainClone(path, false, &gogit.CloneOptions{
-		URL: repoURL,
+		URL:  repoURL,
+		Auth: auth,
 	})
 	return err
 }
@@ -44,7 +46,9 @@ func (goGitBackend) Pull(path string) error {
 		return err
 	}
 
-	if err := r.Fetch(&gogit.FetchOptions{RemoteName: "origin"}); err != nil {
+	auth, _ := buildAuth(goGitRemoteURL(r))
+
+	if err := r.Fetch(&gogit.FetchOptions{RemoteName: "origin", Auth: auth}); err != nil {
 		if !errors.Is(err, gogit.NoErrAlreadyUpToDate) {
 			return err
 		}
@@ -77,7 +81,7 @@ func (goGitBackend) Pull(path string) error {
 		return w.Checkout(&gogit.CheckoutOptions{Branch: localRefName, Force: true})
 	}
 
-	err = w.Pull(&gogit.PullOptions{RemoteName: "origin"})
+	err = w.Pull(&gogit.PullOptions{RemoteName: "origin", Auth: auth})
 	if err == nil || errors.Is(err, gogit.NoErrAlreadyUpToDate) {
 		return nil
 	}
@@ -116,7 +120,8 @@ func (goGitBackend) Push(path string) error {
 		sig := goGitSignature(r)
 		_, _ = w.Commit("sync vault", &gogit.CommitOptions{Author: sig, Committer: sig})
 	}
-	err = r.Push(&gogit.PushOptions{RemoteName: "origin"})
+	auth, _ := buildAuth(goGitRemoteURL(r))
+	err = r.Push(&gogit.PushOptions{RemoteName: "origin", Auth: auth})
 	if err == nil || errors.Is(err, gogit.NoErrAlreadyUpToDate) {
 		return nil
 	}
@@ -178,7 +183,8 @@ func (goGitBackend) RemoteHasCommit(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	refs, err := remote.List(&gogit.ListOptions{})
+	auth, _ := buildAuth(goGitRemoteURL(r))
+	refs, err := remote.List(&gogit.ListOptions{Auth: auth})
 	if err != nil {
 		// 远程存在但里头空（无任何引用）→ 等同于 "没有提交"
 		if errors.Is(err, transport.ErrEmptyRemoteRepository) {
@@ -270,6 +276,23 @@ func (goGitBackend) RemoteURL(path string) string {
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
+
+// goGitRemoteURL 从一个已打开的仓库里取 origin 的 URL；
+// 没有或读取失败时返回空串（buildAuth 收到空串会判定为非 SSH 直接返回 nil）。
+func goGitRemoteURL(r *gogit.Repository) string {
+	if r == nil {
+		return ""
+	}
+	remote, err := r.Remote("origin")
+	if err != nil {
+		return ""
+	}
+	urls := remote.Config().URLs
+	if len(urls) == 0 {
+		return ""
+	}
+	return urls[0]
+}
 
 func goGitDetectDefaultBranch(r *gogit.Repository) string {
 	refs, err := r.References()

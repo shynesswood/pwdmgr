@@ -238,6 +238,29 @@ mkdir $local
 - **自动化**：`TestGG10_TopLevelDispatchViaGoGit` @ `internal/git/gogit_test.go`
 - **预期**：`SetBackend("go-git")` 后直接调用包级 `Init / AddRemote / Commit / Push / RemoteHasCommit` 仍能完成端到端推送
 
+### GGA1 — URL 分类 `isSSHURL`  🤖
+
+- **自动化**：`TestGGA1_IsSSHURL` @ `internal/git/gogit_auth_test.go`
+- **覆盖**：`git@host:path`、`ssh://...` 为 SSH；`https / http / git / file / 本地路径 / Windows 路径` 不算 SSH
+
+### GGA2 — URL 用户名解析 🤖
+
+- **自动化**：`TestGGA2_SSHUserFromURL` @ `internal/git/gogit_auth_test.go`
+- **覆盖**：`deploy@host:repo` → `deploy`；无 `@` 时默认 `git`
+
+### GGA3 — 非 SSH URL 不注入 Auth 🤖
+
+- **自动化**：`TestGGA3_BuildAuthSkipsNonSSH` @ `internal/git/gogit_auth_test.go`
+- **覆盖**：`https / http / file / 本地路径 / 空串` 走 `buildAuth` 都返回 `(nil, nil)`，让 go-git 保持默认行为
+
+### GGA4 — 真实 SSH 连通性（手工）🖱️
+
+- **手工**：把 `pwdmgr.config.json` 的 `remote_url` 填成 GitHub SSH URL（`git@github.com:user/repo.git`），`git_client: "go-git"`，通过 Finder / Launchpad 启动应用（不是从 shell），触发 Sync
+- **预期**：不再出现 `ssh: handshake failed: EOF`；看命中的凭据优先级
+  1. macOS 桌面 + ssh-agent 未运行：自动加载 `~/.ssh/id_ed25519` / `id_rsa`（无口令）完成认证
+  2. 终端 `wails dev`（继承 `SSH_AUTH_SOCK`）：走 ssh-agent
+  3. 无任何凭据：抛出含路径的可读错误，而不是 EOF
+
 ---
 
 ## 一 · B、界面编辑应用配置（9 个用例）
@@ -973,6 +996,7 @@ mkdir $local
 | git 层 (G) | 11 | 11 | 0 |
 | git 后端切换 (BK) | 4 | 4 | 0 |
 | go-git 后端 (GG) | 10 | 10 | 0 |
+| go-git SSH 认证 (GGA) | 4 | 3 | 1 |
 | config git_client (CFG-GC) | 2 | 2 | 0 |
 | config.Save (CFG-SV) | 4 | 4 | 0 |
 | 配置搜索路径 (CFG-CP) | 2 | 2 | 0 |
@@ -993,7 +1017,7 @@ mkdir $local
 | 批量移动 前端 (MV-E) | 6 | 0 | 6 |
 | 端到端 (E) | 4 | 0 | 4 |
 | 边界异常 (X) | 7 | 7 | 0 |
-| **合计** | **131** | **113** | **18** |
+| **合计** | **135** | **116** | **19** |
 
 ---
 
@@ -1009,4 +1033,5 @@ mkdir $local
 | Git 后端抽象 | `internal/git` 抽出 `Backend` 接口，保留原有基于 `os/exec` 的 `execBackend`，新增基于 `github.com/go-git/go-git/v5` 的 `goGitBackend`（纯 Go 实现，不依赖本机 git）；`SetBackend / CurrentBackend` 允许运行时切换；`internal/config.Config` 增加 `git_client` 字段（`exec` / `go-git`，未配置或取值未知时回退 `exec`），`app.Startup / ReloadConfig` 加载配置后自动调用 `git.SetBackend` 同步后端；对外公共 API（`Clone / Pull / Push / Commit / ...`）签名不变，全部通过 dispatcher 调度到当前后端。自动化新增 BK1~BK4（后端切换/规范化）、GG1~GG10（go-git 功能对等）、CFG-GC1~CFG-GC2（配置解析）共 16 个用例 |
 | 设置页编辑配置 | `internal/config.Config` 新增 `Save()`（JSON map 合并 → `tmp + rename` 原子写回，保留未知字段）和 `Path()` / `ResolvedOrCandidatePath()`；`internal/app` 暴露 `UpdateAppConfig(repoRoot, remoteURL, gitClient) -> Snapshot`，做绝对路径 / 非文件 / 空值校验后写盘、重新 Load 并同步切换 git 后端；手工维护的 `frontend/wailsjs/go/app/App.{d.ts,js}` 同步补上 `UpdateAppConfig` 绑定；`SettingsTab.vue` 重写为只读 / 编辑两种模式，`git_client` 使用下拉选择，`App.vue` 提供 `doSaveAppConfig`（保存前自动锁定 vault）。自动化新增 CFG-SV1~CFG-SV4（Save）、APP-UC1~APP-UC5（UpdateAppConfig）共 9 个用例，手工新增 CFG-E1 / CFG-E2 共 2 个 |
 | 配置搜索优先级 | `CandidatePaths()` 搜索顺序调整为「可执行文件同级 → 当前工作目录 → 用户配置目录」（环境变量 `PWDMGR_CONFIG` 仍然最优先），便于便携式部署与 `wails dev` 开发；`ResolveConfigPath` 在所有候选都不存在时仍回退到用户配置目录，保证首次 `Save()` 在 macOS `.app` 场景下可写。README 表格与提示同步更新。自动化新增 CFG-CP1 / CFG-CP2 共 2 个用例 |
+| go-git SSH 认证 | 修复 `git_client: "go-git"` 在 macOS Finder 启动时 `ssh: handshake failed: EOF`。新增 `internal/git/gogit_auth.go`：`isSSHURL` 识别 `ssh://` 与 SCP 短写法，`buildAuth` 按「ssh-agent → `~/.ssh/id_ed25519` → `id_ecdsa` → `id_rsa`（无口令）」依次选取凭据，`HostKeyCallback` 优先读 `~/.ssh/known_hosts`，读不到则回退 `InsecureIgnoreHostKey` 保持与系统 git 首次连接一致的体验；`goGitBackend` 的 `Clone / Pull / Fetch / Push / RemoteHasCommit` 全部传入 `Auth`，URL 从本地 origin 取（用新增 `goGitRemoteURL` helper）。自动化新增 GGA1~GGA3（URL 分类 / 用户名 / 非 SSH 跳过）共 3 个用例，手工新增 GGA4（真实 SSH 连通）1 个 |
 | 批量移动 | Vault 新增 `MoveEntries(ids, targetSpaceID)`，静默跳过无效 ID、对被移动条目刷新 `UpdatedAt` 保证同步胜出；service 层 `MoveEntries` 校验目标空间合法性后写回 vault.dat；Wails 绑定 `MoveVaultEntries(password, targetSpaceID, ids) -> (moved int)`；前端新增 `SpacePickerDialog` 通过 `provide('askSpace')` 提供选择空间的通用能力，EntryCard 增加"移动"按钮、选择模式下的复选框，VaultTab 新增批量选择工具栏（全选当前 / 移动到… / 完成）。自动化新增 MV1~MV4（vault）+ MV-I1~MV-I5（service）共 9 个用例，手工新增 MV-E1~MV-E6 共 6 个用例 |

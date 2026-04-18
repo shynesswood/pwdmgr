@@ -89,7 +89,11 @@ wails build -platform windows/amd64
 | `remote_url` | 否 | 空 | Git 远程仓库地址，留空则仅本地使用，不同步 |
 | `git_client` | 否 | `exec` | Git 底层实现：`exec` 调用本机 `git` 命令；`go-git` 使用纯 Go 实现（不依赖本机 Git）。留空或取值未知时回退为 `exec` |
 
-> **go-git 模式注意**：目前 go-git 后端的 `Pull` 仅支持 fast-forward / 合并（不支持 `--rebase`）。在我们同步时"工作区已清空再 pull"的前提下足够使用；若你习惯频繁手动改动本地仓库文件，推荐继续保持默认的 `exec` 后端。
+> **go-git 模式注意**：
+>
+> - `Pull` 仅支持 fast-forward / 合并（不支持 `--rebase`）。在我们同步时"工作区已清空再 pull"的前提下足够使用；若你习惯频繁手动改动本地仓库文件，推荐继续保持默认的 `exec` 后端。
+> - **SSH 认证链**与系统 `git` 不同：go-git 不读 `~/.ssh/config`、不自动调用 ssh-agent（macOS 从 Finder/Launchpad 启动的 GUI 应用尤其明显）。应用内部已按 `ssh-agent → ~/.ssh/id_ed25519 → id_ecdsa → id_rsa` 的顺序加载；**只支持未加密的私钥**，若你的 key 有口令，请改用 HTTPS + Token、`git_client: "exec"`，或先 `ssh-add` 到 agent 并把应用从终端启动。
+> - `HostKeyCallback` 优先读 `~/.ssh/known_hosts`；读不到时回退"忽略主机指纹"（与系统 `git` 的 `StrictHostKeyChecking=ask` 体验一致），避免首次跑 go-git 就报 EOF。
 
 > **在界面修改配置**：打开应用 → **设置** 页 → **编辑配置**，可直接改写上述三项，点击 **保存** 即可：
 >
