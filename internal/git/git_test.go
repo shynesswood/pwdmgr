@@ -273,6 +273,27 @@ func TestG10_CurrentBranch(t *testing.T) {
 // G11 — RemoteURL 获取远程地址
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// G12 — exec 后端的 Pull 对空远程不报错
+// ---------------------------------------------------------------------------
+
+func TestG12_ExecPullToleratesEmptyRemote(t *testing.T) {
+	requireGit(t)
+	remote := initBareRemote(t)
+
+	repo := initTestRepo(t)
+	require.NoError(t, AddRemote(repo, remote))
+
+	// 本地无提交 + 空远程
+	require.NoError(t, Pull(repo), "空仓库 + 空远程的 Pull 应成功")
+
+	// 本地有提交 + 空远程
+	writeFile(t, repo, "local.txt", "only local")
+	run(t, repo, "add", ".")
+	run(t, repo, "commit", "-m", "local")
+	require.NoError(t, Pull(repo), "本地有提交 + 空远程的 Pull 应成功")
+}
+
 func TestG11_RemoteURL(t *testing.T) {
 	requireGit(t)
 	repo := initTestRepo(t)

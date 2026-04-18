@@ -49,7 +49,13 @@ func (goGitBackend) Pull(path string) error {
 	auth, _ := buildAuth(goGitRemoteURL(r))
 
 	if err := r.Fetch(&gogit.FetchOptions{RemoteName: "origin", Auth: auth}); err != nil {
-		if !errors.Is(err, gogit.NoErrAlreadyUpToDate) {
+		switch {
+		case errors.Is(err, gogit.NoErrAlreadyUpToDate):
+			// 已经是最新，继续走后面的本地 checkout / merge 逻辑
+		case errors.Is(err, transport.ErrEmptyRemoteRepository):
+			// 远程 bare 仓库里还没有任何 ref：没东西可拉，本地保持现状即可
+			return nil
+		default:
 			return err
 		}
 	}
@@ -82,7 +88,10 @@ func (goGitBackend) Pull(path string) error {
 	}
 
 	err = w.Pull(&gogit.PullOptions{RemoteName: "origin", Auth: auth})
-	if err == nil || errors.Is(err, gogit.NoErrAlreadyUpToDate) {
+	switch {
+	case err == nil,
+		errors.Is(err, gogit.NoErrAlreadyUpToDate),
+		errors.Is(err, transport.ErrEmptyRemoteRepository):
 		return nil
 	}
 	return err

@@ -46,6 +46,11 @@ func (execBackend) Pull(path string) error {
 		return originalErr
 	}
 
+	// 远程仍是空仓库（没有任何 remote-tracking ref）→ 没东西可拉，不算错
+	if out, rerr := runGitCommand(path, "branch", "-r"); rerr == nil && strings.TrimSpace(string(out)) == "" {
+		return nil
+	}
+
 	branch := detectDefaultBranch(path)
 
 	// 检查是否有本地提交

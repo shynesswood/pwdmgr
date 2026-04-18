@@ -263,3 +263,22 @@ func TestGG10_TopLevelDispatchViaGoGit(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, hasCommit, "顶层 Push 经 go-git 后远程应有提交")
 }
+
+// ---------------------------------------------------------------------------
+// GG11 — Pull 对空远程不报错（本地即便有提交也能走通 Sync 流程）
+// ---------------------------------------------------------------------------
+
+func TestGG11_PullToleratesEmptyRemote(t *testing.T) {
+	b := newGoGit()
+	remote := initBareGoGit(t)
+	repo := initGoGitRepo(t)
+	require.NoError(t, b.AddRemote(repo, remote))
+
+	// case A: 本地也没 HEAD，空远程 Pull 应返回 nil
+	require.NoError(t, b.Pull(repo), "空仓库 + 空远程的 Pull 应成功")
+
+	// case B: 本地有提交，远程仍是空的：对齐 "没东西可拉" 语义
+	writeGoGitFile(t, repo, "local.txt", "only local")
+	require.NoError(t, b.Commit(repo, "local commit"))
+	require.NoError(t, b.Pull(repo), "本地有提交 + 空远程的 Pull 不应报错")
+}
