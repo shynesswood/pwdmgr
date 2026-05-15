@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 
 const props = defineProps({
   entry: Object,
@@ -30,6 +30,40 @@ function getAvatarGradient(name) {
   const code = (name || '?').charCodeAt(0)
   const pair = avatarColors[code % avatarColors.length]
   return `linear-gradient(135deg, ${pair[0]}, ${pair[1]})`
+}
+
+const noteSegments = computed(() => {
+  if (!props.entry.note) return []
+  const note = props.entry.note
+  const regex = /<a>(.*?)<\/a>/gs
+  const segments = []
+  let lastIndex = 0
+  let match
+
+  while ((match = regex.exec(note)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({ type: 'text', content: note.slice(lastIndex, match.index) })
+    }
+    segments.push({ type: 'link', content: match[1] })
+    lastIndex = regex.lastIndex
+  }
+
+  if (lastIndex < note.length) {
+    segments.push({ type: 'text', content: note.slice(lastIndex) })
+  }
+
+  return segments
+})
+
+const copyFeedback = ref({})
+
+function copyToClipboard(text, index) {
+  navigator.clipboard.writeText(text).then(() => {
+    copyFeedback.value[index] = true
+    setTimeout(() => {
+      copyFeedback.value[index] = false
+    }, 1500)
+  })
 }
 </script>
 
@@ -88,7 +122,24 @@ function getAvatarGradient(name) {
 
     <Transition name="slide">
       <div v-if="noteExpanded && entry.note" class="entry-card__note">
-        <div class="entry-card__note-content">{{ entry.note }}</div>
+        <div class="entry-card__note-content">
+          <template v-for="(seg, idx) in noteSegments" :key="idx">
+            <span v-if="seg.type === 'text'">{{ seg.content }}</span>
+            <span v-else class="entry-card__note-quote">
+              <span class="entry-card__note-quote-text">{{ seg.content }}</span>
+              <button
+                type="button"
+                class="entry-card__note-quote-copy"
+                :class="{ 'entry-card__note-quote-copy--copied': copyFeedback[idx] }"
+                @click.stop="copyToClipboard(seg.content, idx)"
+                :title="copyFeedback[idx] ? '已复制' : '点击复制'"
+              >
+                <svg v-if="!copyFeedback[idx]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              </button>
+            </span>
+          </template>
+        </div>
       </div>
     </Transition>
 
@@ -328,6 +379,62 @@ function getAvatarGradient(name) {
   color: color-mix(in srgb, CanvasText 70%, transparent);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.entry-card__note-quote {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  margin: 0 2px;
+  background: color-mix(in srgb, Highlight 8%, transparent);
+  border-left: 3px solid Highlight;
+  border-radius: 3px;
+  font-weight: 500;
+  color: color-mix(in srgb, CanvasText 85%, transparent);
+  transition: background 0.12s ease;
+}
+
+.entry-card__note-quote:hover {
+  background: color-mix(in srgb, Highlight 14%, transparent);
+}
+
+.entry-card__note-quote-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.entry-card__note-quote-copy {
+  appearance: none;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+  color: color-mix(in srgb, CanvasText 40%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s ease;
+  flex-shrink: 0;
+}
+
+.entry-card__note-quote-copy:hover {
+  background: color-mix(in srgb, CanvasText 10%, transparent);
+  color: color-mix(in srgb, CanvasText 70%, transparent);
+}
+
+.entry-card__note-quote-copy--copied {
+  color: #10b981;
+}
+
+.entry-card__note-quote-copy--copied:hover {
+  color: #059669;
+}
+
+@media (prefers-color-scheme: dark) {
+  .entry-card__note-quote-copy--copied { color: #34d399; }
+  .entry-card__note-quote-copy--copied:hover { color: #10b981; }
 }
 
 @media (prefers-color-scheme: dark) {
